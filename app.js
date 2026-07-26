@@ -30,6 +30,40 @@ function advanceBy(ts, freq) {
   return d.getTime();
 }
 
+/* Custom weekday recurrence: freq "days" + a set of JS weekday numbers
+   (0=Sun … 6=Sat). Occurrences land at 00:00 local on each chosen day. */
+
+const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]; // display Monday-first
+
+function endOfDay(ts) {
+  const d = new Date(ts);
+  d.setHours(23, 59, 59, 999);
+  return d.getTime();
+}
+
+function nextOccurrence(fromTs, days) {
+  for (let k = 1; k <= 7; k++) {
+    const d = new Date(fromTs);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + k);
+    if (days.includes(d.getDay())) return d.getTime();
+  }
+  return endOfDay(fromTs); // unreachable with a non-empty day set
+}
+
+function advanceTemplate(template, fromTs) {
+  return template.freq === "days"
+    ? nextOccurrence(fromTs, template.days)
+    : advanceBy(fromTs, template.freq);
+}
+
+function freqLabel(template) {
+  if (template.freq !== "days") return FREQUENCIES[template.freq].label;
+  if (template.days.length === 7) return "Daily";
+  return WEEK_ORDER.filter((d) => template.days.includes(d)).map((d) => DAY_SHORT[d]).join(", ");
+}
+
 /* ============================================================
    Storage — versioned schema, validation, daily rolling backups,
    auto-recovery, export/import
@@ -52,13 +86,23 @@ function sanitizeTask(t) {
 
 function sanitizeRecurring(r) {
   if (!r || typeof r !== "object") return null;
-  if (typeof r.id !== "string" || typeof r.title !== "string" || !FREQUENCIES[r.freq]) return null;
-  return {
+  if (typeof r.id !== "string" || typeof r.title !== "string") return null;
+  if (!FREQUENCIES[r.freq] && r.freq !== "days") return null;
+  const clean = {
     id: r.id,
     title: String(r.title).slice(0, 500),
     freq: r.freq,
-    nextAt: Number.isFinite(r.nextAt) ? r.nextAt : advanceBy(Date.now(), r.freq),
+    nextAt: Number.isFinite(r.nextAt) ? r.nextAt : 0,
   };
+  if (r.freq === "days") {
+    const days = Array.isArray(r.days)
+      ? [...new Set(r.days.filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))]
+      : [];
+    if (days.length === 0) return null;
+    clean.days = days;
+  }
+  if (!clean.nextAt) clean.nextAt = advanceTemplate(clean, Date.now());
+  return clean;
 }
 
 function sanitizeData(raw) {
@@ -260,17 +304,19 @@ function renameTask(id, title) {
    Recurring tasks — a template spawns a fresh card each period
    ============================================================ */
 
-function addRecurring(title, freq, firstDueAt) {
-  const template = {
-    id: makeId(),
-    title: title.trim(),
-    freq,
-    nextAt: advanceBy(Date.now(), freq),
-  };
+function addRecurring(title, freq, firstDueAt, days = null) {
+  const now = Date.now();
+  const template = { id: makeId(), title: title.trim(), freq };
+  if (freq === "days") template.days = days;
+  template.nextAt = advanceTemplate(template, now);
   data.recurring.push(template);
-  // First occurrence lands on the board right away
+  // First occurrence lands on the board right away. Day-based tasks are
+  // due by the end of their day (today if it's a chosen day, else the next one)
+  const defaultDue = freq === "days"
+    ? (days.includes(new Date(now).getDay()) ? endOfDay(now) : endOfDay(template.nextAt))
+    : template.nextAt;
   addTask(title, {
-    dueAt: firstDueAt || template.nextAt,
+    dueAt: firstDueAt || defaultDue,
     recurringId: template.id,
   });
 }
@@ -297,7 +343,7 @@ function runRecurrence() {
   for (const template of data.recurring) {
     let due = false;
     while (template.nextAt <= now) {
-      template.nextAt = advanceBy(template.nextAt, template.freq);
+      template.nextAt = advanceTemplate(template, template.nextAt);
       due = true;
       changed = true;
     }
@@ -308,7 +354,8 @@ function runRecurrence() {
         status: "backlog",
         createdAt: now,
         completedAt: null,
-        dueAt: template.nextAt,
+        // Day-based tasks are for that day; others run until the next occurrence
+        dueAt: template.freq === "days" ? endOfDay(now) : template.nextAt,
         recurringId: template.id,
       });
     }
@@ -332,7 +379,7 @@ function renderRecurringPanel() {
     title.title = r.title;
     const meta = document.createElement("span");
     meta.className = "r-meta";
-    meta.textContent = `${FREQUENCIES[r.freq].label} · next ${formatDate(r.nextAt)}`;
+    meta.textContent = `${freqLabel(r)} · next ${formatDate(r.nextAt)}`;
     const stop = document.createElement("button");
     stop.type = "button";
     stop.className = "r-stop";
@@ -447,7 +494,7 @@ function buildCard(task, now) {
     const template = data.recurring.find((r) => r.id === task.recurringId);
     const badge = document.createElement("span");
     badge.className = "badge";
-    badge.textContent = `↻ ${template ? FREQUENCIES[template.freq].label : "Repeats"}`;
+    badge.textContent = `↻ ${template ? freqLabel(template) : "Repeats"}`;
     badges.appendChild(badge);
   }
   if (badges.childNodes.length) {
@@ -529,6 +576,24 @@ const addForm = document.getElementById("add-form");
 const taskInput = document.getElementById("task-input");
 const dueInput = document.getElementById("due-input");
 const recurInput = document.getElementById("recur-input");
+const daysPicker = document.getElementById("days-picker");
+
+recurInput.addEventListener("change", () => {
+  daysPicker.hidden = recurInput.value !== "days";
+});
+
+for (const btn of daysPicker.querySelectorAll("button")) {
+  btn.addEventListener("click", () => btn.classList.toggle("is-active"));
+}
+
+function pickedDays() {
+  return [...daysPicker.querySelectorAll("button.is-active")].map((b) => Number(b.dataset.day));
+}
+
+function resetDaysPicker() {
+  daysPicker.hidden = true;
+  for (const btn of daysPicker.querySelectorAll("button.is-active")) btn.classList.remove("is-active");
+}
 
 function pickedDueAt() {
   if (!dueInput.value) return null;
@@ -540,7 +605,14 @@ addForm.addEventListener("submit", (e) => {
   e.preventDefault();
   const title = taskInput.value.trim();
   if (!title) return;
-  if (recurInput.value) {
+  if (recurInput.value === "days") {
+    const days = pickedDays();
+    if (days.length === 0) {
+      showToast("Pick at least one day for the repeat");
+      return;
+    }
+    addRecurring(title, "days", pickedDueAt(), days);
+  } else if (recurInput.value) {
     addRecurring(title, recurInput.value, pickedDueAt());
   } else {
     addTask(title, { dueAt: pickedDueAt() });
@@ -548,6 +620,7 @@ addForm.addEventListener("submit", (e) => {
   taskInput.value = "";
   dueInput.value = "";
   recurInput.value = "";
+  resetDaysPicker();
   taskInput.focus();
 });
 

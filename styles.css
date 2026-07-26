@@ -201,6 +201,32 @@ main {
   color: var(--text-secondary);
 }
 
+.days-picker {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.days-picker[hidden] { display: none; }
+
+.days-picker button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.days-picker button.is-active {
+  background: var(--series-1);
+  border-color: var(--series-1);
+  color: #fff;
+}
+
 .add-options input,
 .add-options select {
   font: inherit;

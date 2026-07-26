@@ -24,8 +24,10 @@ browser's `localStorage`.
   (overdue). The colors always come with a text label ("Due tomorrow",
   "Overdue 2.0 d"), so meaning never relies on color alone.
 - **Recurring tasks** — set a task to repeat daily, weekly, monthly,
-  quarterly, half-yearly, or yearly. A fresh card appears in the backlog each
-  period, due by the next occurrence. If the previous card is still open, no
+  quarterly, half-yearly, yearly, or on **custom weekdays** ("Custom days…"
+  reveals Mon–Sun toggles, so "every Monday" or "Mon + Thu" both work). A
+  fresh card appears in the backlog each period — due by the next occurrence,
+  or by the end of the day for weekday-based repeats. If the previous card is still open, no
   duplicate is spawned; after a long absence, missed periods are skipped
   rather than piled up. Manage or stop recurrences in the ↻ panel under the
   board.
