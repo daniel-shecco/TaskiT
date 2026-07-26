@@ -443,15 +443,33 @@ function formatDuration(ms) {
    Board rendering
    ============================================================ */
 
+/* Done cards older than this leave the board (but stay in the data,
+   the stats, sync, and exports) */
+const ARCHIVE_AFTER_MS = 7 * DAY_MS;
+
+function isArchived(task, now = Date.now()) {
+  return task.status === "done" && task.completedAt && now - task.completedAt > ARCHIVE_AFTER_MS;
+}
+
+function archivedCount(now = Date.now()) {
+  return data.tasks.filter((t) => isArchived(t, now)).length;
+}
+
 function renderBoard() {
   const now = Date.now();
   for (const status of STATUSES) {
     const container = document.querySelector(`.cards[data-status="${status}"]`);
-    const items = data.tasks.filter((t) => t.status === status);
+    let items = data.tasks.filter((t) => t.status === status);
+    let archived = 0;
+    if (status === "done") {
+      const visible = items.filter((t) => !isArchived(t, now));
+      archived = items.length - visible.length;
+      items = visible;
+    }
     container.innerHTML = "";
     document.querySelector(`[data-count="${status}"]`).textContent = items.length;
 
-    if (items.length === 0) {
+    if (items.length === 0 && archived === 0) {
       const note = document.createElement("p");
       note.className = "empty-note";
       note.textContent =
@@ -463,6 +481,13 @@ function renderBoard() {
     }
 
     for (const task of items) container.appendChild(buildCard(task, now));
+
+    if (archived > 0) {
+      const note = document.createElement("p");
+      note.className = "empty-note";
+      note.textContent = `🗄 ${archived} older task${archived === 1 ? "" : "s"} archived — still counted in Stats`;
+      container.appendChild(note);
+    }
   }
   renderRecurringPanel();
 }
@@ -840,6 +865,9 @@ function renderStats() {
 
   document.getElementById("stat-done").textContent = done.length;
   document.getElementById("stat-open").textContent = open;
+  const archived = archivedCount();
+  document.getElementById("stat-done-note").textContent =
+    archived > 0 ? `incl. ${archived} archived from the board` : "";
 
   const avgEl = document.getElementById("stat-avg");
   const deltaEl = document.getElementById("stat-avg-delta");

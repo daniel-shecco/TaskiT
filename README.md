@@ -12,6 +12,10 @@ browser's `localStorage`.
 - **Creation & completion dates** — every task records when it was created;
   moving a card to *Done* stamps its completion time. Done cards show how long
   they took (✓ 3.2 d, ✓ 45 min, …).
+- **Auto-archive** — done cards leave the board 7 days after completion to
+  keep the Done column tidy. Nothing is deleted: archived tasks stay in your
+  data, sync, exports, and all statistics; the Done column shows a "🗄 N
+  archived" note and the Stats tab counts them.
 - **Stats view** — see how your pace changes over time:
   - Average time-to-done, with a trend vs. the previous 4 weeks.
   - A weekly chart of average completion time (hover a bar for details).
