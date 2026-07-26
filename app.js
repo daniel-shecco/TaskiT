@@ -291,13 +291,17 @@ function removeTask(id) {
   renderAll();
 }
 
-function renameTask(id, title) {
-  const task = data.tasks.find((t) => t.id === id);
-  const trimmed = (title || "").trim();
-  if (!task || !trimmed) return;
-  task.title = trimmed;
-  save();
-  renderAll();
+/* Column order: open columns show the most urgent deadline first
+   (overdue at the very top), then no-deadline tasks newest-first;
+   the Done column shows the most recently finished first. */
+function boardComparator(status) {
+  if (status === "done") return (a, b) => (b.completedAt || 0) - (a.completedAt || 0);
+  return (a, b) => {
+    const ad = a.dueAt || Infinity;
+    const bd = b.dueAt || Infinity;
+    if (ad !== bd) return ad - bd;
+    return b.createdAt - a.createdAt;
+  };
 }
 
 /* ============================================================
@@ -324,6 +328,9 @@ function addRecurring(title, freq, firstDueAt, days = null) {
 function stopRecurring(id) {
   data.recurring = data.recurring.filter((r) => r.id !== id);
   // Existing cards stay on the board; only future spawns stop
+  for (const t of data.tasks) {
+    if (t.recurringId === id) t.recurringId = null;
+  }
   save();
   renderAll();
 }
@@ -466,6 +473,7 @@ function renderBoard() {
       archived = items.length - visible.length;
       items = visible;
     }
+    items = [...items].sort(boardComparator(status));
     container.innerHTML = "";
     document.querySelector(`[data-count="${status}"]`).textContent = items.length;
 
@@ -545,11 +553,12 @@ function buildCard(task, now) {
   const idx = STATUSES.indexOf(task.status);
   const back = actionButton("◀", "Move left", idx === 0, () => setStatus(task.id, STATUSES[idx - 1]));
   const fwd = actionButton("▶", "Move right", idx === STATUSES.length - 1, () => setStatus(task.id, STATUSES[idx + 1]));
+  const edit = actionButton("✎", "Edit task", false, () => openEdit(task.id));
   const del = actionButton("✕", "Delete task", false, () => {
     if (confirm(`Delete "${task.title}"?`)) removeTask(task.id);
   });
   del.classList.add("delete-btn");
-  actions.append(back, fwd, del);
+  actions.append(back, fwd, edit, del);
 
   meta.append(when, actions);
   card.appendChild(meta);
@@ -560,10 +569,7 @@ function buildCard(task, now) {
     card.classList.add("dragging");
   });
   card.addEventListener("dragend", () => card.classList.remove("dragging"));
-  card.addEventListener("dblclick", () => {
-    const next = prompt("Rename task:", task.title);
-    if (next !== null) renameTask(task.id, next);
-  });
+  card.addEventListener("dblclick", () => openEdit(task.id));
 
   return card;
 }
@@ -603,27 +609,49 @@ const dueInput = document.getElementById("due-input");
 const recurInput = document.getElementById("recur-input");
 const daysPicker = document.getElementById("days-picker");
 
+/* Day-picker helpers, shared by the add form and the edit dialog */
+function wirePicker(picker) {
+  for (const btn of picker.querySelectorAll("button")) {
+    btn.addEventListener("click", () => btn.classList.toggle("is-active"));
+  }
+}
+
+function pickerDays(picker) {
+  return [...picker.querySelectorAll("button.is-active")].map((b) => Number(b.dataset.day));
+}
+
+function setPickerDays(picker, days) {
+  for (const btn of picker.querySelectorAll("button")) {
+    btn.classList.toggle("is-active", days.includes(Number(btn.dataset.day)));
+  }
+}
+
+wirePicker(daysPicker);
+
 recurInput.addEventListener("change", () => {
   daysPicker.hidden = recurInput.value !== "days";
 });
 
-for (const btn of daysPicker.querySelectorAll("button")) {
-  btn.addEventListener("click", () => btn.classList.toggle("is-active"));
-}
-
-function pickedDays() {
-  return [...daysPicker.querySelectorAll("button.is-active")].map((b) => Number(b.dataset.day));
-}
-
 function resetDaysPicker() {
   daysPicker.hidden = true;
-  for (const btn of daysPicker.querySelectorAll("button.is-active")) btn.classList.remove("is-active");
+  setPickerDays(daysPicker, []);
+}
+
+function dateInputToDueAt(value) {
+  if (!value) return null;
+  const [y, m, d] = value.split("-").map(Number);
+  return new Date(y, m - 1, d, 23, 59, 59).getTime(); // end of the chosen day, local time
+}
+
+function dueAtToDateInput(dueAt) {
+  if (!dueAt) return "";
+  const d = new Date(dueAt);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function pickedDueAt() {
-  if (!dueInput.value) return null;
-  const [y, m, d] = dueInput.value.split("-").map(Number);
-  return new Date(y, m - 1, d, 23, 59, 59).getTime(); // end of the chosen day, local time
+  return dateInputToDueAt(dueInput.value);
 }
 
 addForm.addEventListener("submit", (e) => {
@@ -631,7 +659,7 @@ addForm.addEventListener("submit", (e) => {
   const title = taskInput.value.trim();
   if (!title) return;
   if (recurInput.value === "days") {
-    const days = pickedDays();
+    const days = pickerDays(daysPicker);
     if (days.length === 0) {
       showToast("Pick at least one day for the repeat");
       return;
@@ -647,6 +675,108 @@ addForm.addEventListener("submit", (e) => {
   recurInput.value = "";
   resetDaysPicker();
   taskInput.focus();
+});
+
+/* ============================================================
+   Edit dialog — change title, due date, and recurrence in place
+   ============================================================ */
+
+const editDialog = document.getElementById("edit-dialog");
+const editForm = document.getElementById("edit-form");
+const editTitle = document.getElementById("edit-title");
+const editDue = document.getElementById("edit-due");
+const editRecur = document.getElementById("edit-recur");
+const editDaysPicker = document.getElementById("edit-days-picker");
+
+wirePicker(editDaysPicker);
+editRecur.addEventListener("change", () => {
+  editDaysPicker.hidden = editRecur.value !== "days";
+});
+
+let editingId = null;
+let editingOriginalDue = "";
+
+function openEdit(id) {
+  const task = data.tasks.find((t) => t.id === id);
+  if (!task) return;
+  editingId = id;
+  editTitle.value = task.title;
+  editingOriginalDue = dueAtToDateInput(task.dueAt);
+  editDue.value = editingOriginalDue;
+
+  const template = task.recurringId
+    ? data.recurring.find((r) => r.id === task.recurringId)
+    : null;
+  editRecur.value = template ? template.freq : "";
+  setPickerDays(editDaysPicker, template && template.freq === "days" ? template.days : []);
+  editDaysPicker.hidden = editRecur.value !== "days";
+
+  editDialog.showModal();
+}
+
+document.getElementById("edit-cancel").addEventListener("click", () => editDialog.close());
+
+editForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const task = data.tasks.find((t) => t.id === editingId);
+  if (!task) {
+    editDialog.close();
+    return;
+  }
+
+  const title = editTitle.value.trim();
+  if (!title) return;
+
+  const wantFreq = editRecur.value; // "", standard freq, or "days"
+  let days = null;
+  if (wantFreq === "days") {
+    days = pickerDays(editDaysPicker);
+    if (days.length === 0) {
+      showToast("Pick at least one day for the repeat");
+      return;
+    }
+  }
+
+  task.title = title;
+
+  // Only touch the deadline if the date field actually changed,
+  // so an untouched field keeps the exact original due time
+  if (editDue.value !== editingOriginalDue) {
+    task.dueAt = dateInputToDueAt(editDue.value);
+  }
+
+  let template = task.recurringId
+    ? data.recurring.find((r) => r.id === task.recurringId)
+    : null;
+
+  if (!wantFreq) {
+    // Recurrence removed: stop future spawns, cards stay
+    if (template) {
+      data.recurring = data.recurring.filter((r) => r.id !== template.id);
+      for (const t of data.tasks) {
+        if (t.recurringId === template.id) t.recurringId = null;
+      }
+    }
+  } else {
+    if (!template) {
+      template = { id: makeId(), title, freq: wantFreq };
+      data.recurring.push(template);
+      task.recurringId = template.id;
+    }
+    template.title = title; // future spawns use the edited name
+    template.freq = wantFreq;
+    if (wantFreq === "days") {
+      template.days = days;
+    } else {
+      delete template.days;
+    }
+    template.nextAt = advanceTemplate(template, Date.now());
+  }
+
+  save();
+  renderAll();
+  editDialog.close();
+  showToast("Task updated");
 });
 
 /* ============================================================

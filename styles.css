@@ -596,6 +596,54 @@ main {
   white-space: nowrap;
 }
 
+/* ---------- Edit dialog ---------- */
+#edit-dialog {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  padding: 18px;
+  width: min(420px, 92vw);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+}
+
+#edit-dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+
+.dialog-title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.dialog-field input,
+.dialog-field select {
+  font: inherit;
+  font-size: 15px;
+  color: var(--text-primary);
+  background: var(--page);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+#edit-days-picker { margin-bottom: 10px; }
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 /* ---------- Tooltip & toast ---------- */
 .tooltip {
   position: fixed;

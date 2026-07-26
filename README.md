@@ -9,6 +9,11 @@ browser's `localStorage`.
 - **Kanban board** with three statuses: **Backlog → In Progress → Done**.
   Drag & drop cards between columns on desktop, or use the ◀ / ▶ buttons on
   each card (handy on phones). On small screens the columns become swipeable.
+  Open columns are sorted by urgency — overdue first, then nearest deadline,
+  then no-deadline tasks; Done shows the most recently finished first.
+- **Edit in place** — the ✎ button (or double-click) opens an edit dialog to
+  rename a task, change or clear its due date, and add, change, or remove its
+  recurrence — including turning an existing task into a recurring one.
 - **Creation & completion dates** — every task records when it was created;
   moving a card to *Done* stamps its completion time. Done cards show how long
   they took (✓ 3.2 d, ✓ 45 min, …).

@@ -140,6 +140,46 @@
     </section>
   </main>
 
+  <dialog id="edit-dialog">
+    <form id="edit-form">
+      <h2 class="dialog-title">Edit task</h2>
+      <label class="dialog-field">
+        <span>Title</span>
+        <input id="edit-title" type="text" maxlength="200" required />
+      </label>
+      <label class="dialog-field">
+        <span>Due date</span>
+        <input id="edit-due" type="date" />
+      </label>
+      <label class="dialog-field">
+        <span>Repeat</span>
+        <select id="edit-recur">
+          <option value="">Never</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="quarterly">Quarterly</option>
+          <option value="halfyearly">Half-yearly</option>
+          <option value="yearly">Yearly</option>
+          <option value="days">Custom days…</option>
+        </select>
+      </label>
+      <div id="edit-days-picker" class="days-picker" hidden role="group" aria-label="Repeat on days">
+        <button type="button" data-day="1">Mon</button>
+        <button type="button" data-day="2">Tue</button>
+        <button type="button" data-day="3">Wed</button>
+        <button type="button" data-day="4">Thu</button>
+        <button type="button" data-day="5">Fri</button>
+        <button type="button" data-day="6">Sat</button>
+        <button type="button" data-day="0">Sun</button>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" id="edit-cancel" class="secondary-btn">Cancel</button>
+        <button type="submit" class="add-btn">Save</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="tooltip" class="tooltip" hidden></div>
   <div id="toast" class="toast" hidden></div>
 
