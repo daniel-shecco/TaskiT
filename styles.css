@@ -62,8 +62,7 @@ main {
 .app-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   max-width: 1080px;
   margin: 0 auto;
   padding: 14px 16px;
@@ -75,6 +74,26 @@ main {
   margin: 0;
   letter-spacing: -0.02em;
 }
+
+/* Tabs hug the right edge; a visible sync button slots in beside them */
+.app-header .tabs { margin-left: auto; }
+.sync-btn:not([hidden]) { margin-left: auto; }
+.sync-btn:not([hidden]) + .tabs { margin-left: 0; }
+
+.sync-btn {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sync-btn:hover { border-color: var(--series-1); color: var(--series-1); }
 
 .tabs {
   display: flex;

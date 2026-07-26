@@ -67,7 +67,12 @@ function sanitizeData(raw) {
   const recurring = Array.isArray(raw.recurring)
     ? raw.recurring.map(sanitizeRecurring).filter(Boolean)
     : [];
-  return { version: SCHEMA_VERSION, tasks, recurring };
+  return {
+    version: SCHEMA_VERSION,
+    tasks,
+    recurring,
+    updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : 0,
+  };
 }
 
 function tryParse(json) {
@@ -100,7 +105,7 @@ function loadData() {
     const parsed = tryParse(`{"tasks": ${legacy}}`);
     if (parsed) return parsed;
   }
-  return { version: SCHEMA_VERSION, tasks: [], recurring: [] };
+  return { version: SCHEMA_VERSION, tasks: [], recurring: [], updatedAt: 0 };
 }
 
 function backupMeta() {
@@ -135,7 +140,7 @@ function maybeBackup(serialized) {
 
 let data = loadData();
 
-function save() {
+function persistLocal() {
   const serialized = JSON.stringify(data);
   try {
     localStorage.setItem(STORAGE_KEY, serialized);
@@ -143,6 +148,12 @@ function save() {
   } catch {
     showToast("⚠ Couldn't save — browser storage is full or blocked");
   }
+}
+
+function save() {
+  data.updatedAt = Date.now();
+  persistLocal();
+  bridge.onLocalChange?.();
 }
 
 /* ---------- Export / import ---------- */
@@ -933,9 +944,40 @@ function renderAll() {
   if (!viewStats.hidden) renderStats();
 }
 
+/* ============================================================
+   Sync bridge — the optional cloud-sync module (sync.js) hooks
+   in here; the app is fully functional without it
+   ============================================================ */
+
+export const bridge = {
+  /** Set by sync.js: called (debounced there) after every local mutation */
+  onLocalChange: null,
+  getData: () => data,
+  /** Replace state with a remote copy — persists locally WITHOUT
+      bumping updatedAt or echoing back through onLocalChange */
+  replaceData(remote) {
+    const clean = sanitizeData(remote);
+    if (!clean) return false;
+    data = clean;
+    persistLocal();
+    renderAll();
+    return true;
+  },
+  showToast,
+  setSyncNote(text) {
+    const note = document.getElementById("sync-note");
+    if (note) note.textContent = text;
+  },
+};
+
 runRecurrence();
 renderAll();
 save(); // persist any v1 migration and trigger the daily backup
+
+bridge.setSyncNote("Cloud sync: not configured — see SETUP-SYNC.md to enable it.");
+import("./sync.js").catch(() => {
+  /* sync module missing or failed to load — local-only mode is fine */
+});
 
 // Keep recurrence and deadline colors fresh while the app stays open
 setInterval(() => {

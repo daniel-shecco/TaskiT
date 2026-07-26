@@ -29,6 +29,10 @@ browser's `localStorage`.
   duplicate is spawned; after a long absence, missed periods are skipped
   rather than piled up. Manage or stop recurrences in the ↻ panel under the
   board.
+- **Cloud sync across devices (optional)** — connect a free Firebase project
+  (see [SETUP-SYNC.md](SETUP-SYNC.md)) and sign in with Google to sync your
+  board between phone and laptop in real time, with offline support. Without
+  it, TaskiT stays fully local.
 - **Robust data** — versioned storage with validation, automatic daily
   rolling backups (last 3 days kept), automatic recovery from backup if the
   main store is ever corrupted, and **Export / Import JSON** (Stats tab) for

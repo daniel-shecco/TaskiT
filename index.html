@@ -13,6 +13,7 @@
 <body>
   <header class="app-header">
     <h1 class="app-title">TaskiT</h1>
+    <button type="button" id="sync-btn" class="sync-btn" hidden></button>
     <nav class="tabs" role="tablist">
       <button id="tab-board" class="tab is-active" role="tab" aria-selected="true" aria-controls="view-board">Board</button>
       <button id="tab-stats" class="tab" role="tab" aria-selected="false" aria-controls="view-stats">Stats</button>
@@ -117,6 +118,7 @@
       <div class="list-card data-card">
         <h2 class="chart-title">Your data</h2>
         <p class="chart-subtitle" id="backup-note">Tasks are saved in this browser and auto-backed up daily (last 3 days kept).</p>
+        <p class="chart-subtitle" id="sync-note">Cloud sync: checking…</p>
         <div class="data-actions">
           <button type="button" id="export-btn" class="secondary-btn">Export JSON</button>
           <button type="button" id="import-btn" class="secondary-btn">Import JSON</button>
@@ -129,6 +131,6 @@
   <div id="tooltip" class="tooltip" hidden></div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
