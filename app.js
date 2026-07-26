@@ -1,50 +1,227 @@
 "use strict";
 
 /* ============================================================
-   TaskiT — personal kanban with cycle-time stats & voice input
+   TaskiT — personal kanban with cycle-time stats, voice input,
+   recurring tasks, deadlines, and backed-up local storage
    ============================================================ */
 
-const STORAGE_KEY = "taskit.tasks.v1";
+const STORAGE_KEY = "taskit.data.v2";
+const LEGACY_KEY = "taskit.tasks.v1";
+const BACKUP_KEYS = ["taskit.backup.a", "taskit.backup.b", "taskit.backup.c"];
+const BACKUP_META_KEY = "taskit.backup.meta";
+const SCHEMA_VERSION = 2;
+
 const STATUSES = ["backlog", "progress", "done"];
 const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 
-/* ---------- Store ---------- */
+const FREQUENCIES = {
+  daily: { label: "Daily", advance: (d) => d.setDate(d.getDate() + 1) },
+  weekly: { label: "Weekly", advance: (d) => d.setDate(d.getDate() + 7) },
+  monthly: { label: "Monthly", advance: (d) => d.setMonth(d.getMonth() + 1) },
+  quarterly: { label: "Quarterly", advance: (d) => d.setMonth(d.getMonth() + 3) },
+  halfyearly: { label: "Half-yearly", advance: (d) => d.setMonth(d.getMonth() + 6) },
+  yearly: { label: "Yearly", advance: (d) => d.setFullYear(d.getFullYear() + 1) },
+};
 
-let tasks = load();
+function advanceBy(ts, freq) {
+  const d = new Date(ts);
+  FREQUENCIES[freq].advance(d);
+  return d.getTime();
+}
 
-function load() {
+/* ============================================================
+   Storage — versioned schema, validation, daily rolling backups,
+   auto-recovery, export/import
+   ============================================================ */
+
+function sanitizeTask(t) {
+  if (!t || typeof t !== "object") return null;
+  if (typeof t.id !== "string" || typeof t.title !== "string" || !t.title.trim()) return null;
+  return {
+    id: t.id,
+    title: String(t.title).slice(0, 500),
+    status: STATUSES.includes(t.status) ? t.status : "backlog",
+    createdAt: Number.isFinite(t.createdAt) ? t.createdAt : Date.now(),
+    completedAt: Number.isFinite(t.completedAt) ? t.completedAt : null,
+    dueAt: Number.isFinite(t.dueAt) ? t.dueAt : null,
+    recurringId: typeof t.recurringId === "string" ? t.recurringId : null,
+  };
+}
+
+function sanitizeRecurring(r) {
+  if (!r || typeof r !== "object") return null;
+  if (typeof r.id !== "string" || typeof r.title !== "string" || !FREQUENCIES[r.freq]) return null;
+  return {
+    id: r.id,
+    title: String(r.title).slice(0, 500),
+    freq: r.freq,
+    nextAt: Number.isFinite(r.nextAt) ? r.nextAt : advanceBy(Date.now(), r.freq),
+  };
+}
+
+function sanitizeData(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const tasks = Array.isArray(raw.tasks) ? raw.tasks.map(sanitizeTask).filter(Boolean) : null;
+  if (tasks === null) return null;
+  const recurring = Array.isArray(raw.recurring)
+    ? raw.recurring.map(sanitizeRecurring).filter(Boolean)
+    : [];
+  return { version: SCHEMA_VERSION, tasks, recurring };
+}
+
+function tryParse(json) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((t) => t && t.id && t.title) : [];
+    return sanitizeData(JSON.parse(json));
   } catch {
-    return [];
+    return null;
   }
 }
 
-function save() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+function loadData() {
+  // 1. Current schema
+  const main = localStorage.getItem(STORAGE_KEY);
+  if (main !== null) {
+    const parsed = tryParse(main);
+    if (parsed) return parsed;
+    // Main store corrupt — fall back to the freshest valid backup
+    for (const key of backupKeysNewestFirst()) {
+      const restored = tryParse(localStorage.getItem(key) || "");
+      if (restored) {
+        // Deferred: the toast element isn't in scope yet during boot
+        setTimeout(() => showToast("Recovered tasks from the latest backup"), 0);
+        return restored;
+      }
+    }
+  }
+  // 2. Migrate from the v1 schema (kept in place, not deleted)
+  const legacy = localStorage.getItem(LEGACY_KEY);
+  if (legacy) {
+    const parsed = tryParse(`{"tasks": ${legacy}}`);
+    if (parsed) return parsed;
+  }
+  return { version: SCHEMA_VERSION, tasks: [], recurring: [] };
 }
 
-function addTask(title) {
+function backupMeta() {
+  try {
+    const meta = JSON.parse(localStorage.getItem(BACKUP_META_KEY));
+    if (meta && typeof meta === "object") return meta;
+  } catch { /* fall through */ }
+  return { lastDay: "", slot: 0, lastAt: null };
+}
+
+function backupKeysNewestFirst() {
+  const meta = backupMeta();
+  const keys = [];
+  for (let i = 0; i < BACKUP_KEYS.length; i++) {
+    keys.push(BACKUP_KEYS[(meta.slot - 1 - i + 2 * BACKUP_KEYS.length) % BACKUP_KEYS.length]);
+  }
+  return keys;
+}
+
+function maybeBackup(serialized) {
+  const today = new Date().toISOString().slice(0, 10);
+  const meta = backupMeta();
+  if (meta.lastDay === today) return;
+  try {
+    localStorage.setItem(BACKUP_KEYS[meta.slot % BACKUP_KEYS.length], serialized);
+    localStorage.setItem(
+      BACKUP_META_KEY,
+      JSON.stringify({ lastDay: today, slot: (meta.slot + 1) % BACKUP_KEYS.length, lastAt: Date.now() })
+    );
+  } catch { /* backups are best-effort; never block a save */ }
+}
+
+let data = loadData();
+
+function save() {
+  const serialized = JSON.stringify(data);
+  try {
+    localStorage.setItem(STORAGE_KEY, serialized);
+    maybeBackup(serialized);
+  } catch {
+    showToast("⚠ Couldn't save — browser storage is full or blocked");
+  }
+}
+
+/* ---------- Export / import ---------- */
+
+document.getElementById("export-btn").addEventListener("click", () => {
+  const payload = { app: "TaskiT", exportedAt: new Date().toISOString(), ...data };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `taskit-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+const importFile = document.getElementById("import-file");
+document.getElementById("import-btn").addEventListener("click", () => importFile.click());
+
+importFile.addEventListener("change", () => {
+  const file = importFile.files[0];
+  importFile.value = "";
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const incoming = tryParse(reader.result);
+    if (!incoming) {
+      showToast("⚠ That file isn't a valid TaskiT backup");
+      return;
+    }
+    const ok = confirm(
+      `Replace your current data (${data.tasks.length} tasks, ${data.recurring.length} recurring) ` +
+      `with the imported file (${incoming.tasks.length} tasks, ${incoming.recurring.length} recurring)?`
+    );
+    if (!ok) return;
+    data = incoming;
+    save();
+    renderAll();
+    showToast("Backup imported");
+  };
+  reader.readAsText(file);
+});
+
+function renderBackupNote() {
+  const meta = backupMeta();
+  const note = document.getElementById("backup-note");
+  const when = meta.lastAt ? ` Last auto-backup: ${formatDate(meta.lastAt)}.` : "";
+  note.textContent =
+    "Tasks are saved in this browser and auto-backed up daily (last 3 days kept)." +
+    when + " Export a JSON file now and then to keep a copy outside the browser.";
+}
+
+/* ============================================================
+   Tasks
+   ============================================================ */
+
+function makeId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function addTask(title, { dueAt = null, recurringId = null } = {}) {
   const trimmed = title.trim();
   if (!trimmed) return null;
   const task = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    id: makeId(),
     title: trimmed,
     status: "backlog",
     createdAt: Date.now(),
     completedAt: null,
+    dueAt,
+    recurringId,
   };
-  tasks.unshift(task);
+  data.tasks.unshift(task);
   save();
   renderAll();
   return task;
 }
 
 function setStatus(id, status) {
-  const task = tasks.find((t) => t.id === id);
+  const task = data.tasks.find((t) => t.id === id);
   if (!task || !STATUSES.includes(status) || task.status === status) return;
   task.status = status;
   task.completedAt = status === "done" ? Date.now() : null;
@@ -53,13 +230,13 @@ function setStatus(id, status) {
 }
 
 function removeTask(id) {
-  tasks = tasks.filter((t) => t.id !== id);
+  data.tasks = data.tasks.filter((t) => t.id !== id);
   save();
   renderAll();
 }
 
 function renameTask(id, title) {
-  const task = tasks.find((t) => t.id === id);
+  const task = data.tasks.find((t) => t.id === id);
   const trimmed = (title || "").trim();
   if (!task || !trimmed) return;
   task.title = trimmed;
@@ -67,7 +244,128 @@ function renameTask(id, title) {
   renderAll();
 }
 
-/* ---------- Formatting ---------- */
+/* ============================================================
+   Recurring tasks — a template spawns a fresh card each period
+   ============================================================ */
+
+function addRecurring(title, freq, firstDueAt) {
+  const template = {
+    id: makeId(),
+    title: title.trim(),
+    freq,
+    nextAt: advanceBy(Date.now(), freq),
+  };
+  data.recurring.push(template);
+  // First occurrence lands on the board right away
+  addTask(title, {
+    dueAt: firstDueAt || template.nextAt,
+    recurringId: template.id,
+  });
+}
+
+function stopRecurring(id) {
+  data.recurring = data.recurring.filter((r) => r.id !== id);
+  // Existing cards stay on the board; only future spawns stop
+  save();
+  renderAll();
+}
+
+function hasOpenInstance(recurringId) {
+  return data.tasks.some((t) => t.recurringId === recurringId && t.status !== "done");
+}
+
+/**
+ * Spawns due occurrences. After a long absence, missed periods are
+ * skipped rather than piled up — at most one new card per template,
+ * and none while a previous instance is still open.
+ */
+function runRecurrence() {
+  const now = Date.now();
+  let changed = false;
+  for (const template of data.recurring) {
+    let due = false;
+    while (template.nextAt <= now) {
+      template.nextAt = advanceBy(template.nextAt, template.freq);
+      due = true;
+      changed = true;
+    }
+    if (due && !hasOpenInstance(template.id)) {
+      data.tasks.unshift({
+        id: makeId(),
+        title: template.title,
+        status: "backlog",
+        createdAt: now,
+        completedAt: null,
+        dueAt: template.nextAt,
+        recurringId: template.id,
+      });
+    }
+  }
+  if (changed) {
+    save();
+    renderAll();
+  }
+}
+
+function renderRecurringPanel() {
+  const panel = document.getElementById("recurring-panel");
+  const list = document.getElementById("recurring-list");
+  panel.hidden = data.recurring.length === 0;
+  list.innerHTML = "";
+  for (const r of data.recurring) {
+    const li = document.createElement("li");
+    const title = document.createElement("span");
+    title.className = "r-title";
+    title.textContent = r.title;
+    title.title = r.title;
+    const meta = document.createElement("span");
+    meta.className = "r-meta";
+    meta.textContent = `${FREQUENCIES[r.freq].label} · next ${formatDate(r.nextAt)}`;
+    const stop = document.createElement("button");
+    stop.type = "button";
+    stop.className = "r-stop";
+    stop.textContent = "Stop";
+    stop.setAttribute("aria-label", `Stop repeating "${r.title}"`);
+    stop.addEventListener("click", () => {
+      if (confirm(`Stop repeating "${r.title}"? Cards already on the board stay.`)) {
+        stopRecurring(r.id);
+      }
+    });
+    li.append(title, meta, stop);
+    list.appendChild(li);
+  }
+}
+
+/* ============================================================
+   Deadlines — urgency from green to red
+   ============================================================ */
+
+function urgencyOf(task, now = Date.now()) {
+  if (!task.dueAt || task.status === "done") return null;
+  const remaining = task.dueAt - now;
+  if (remaining <= 0) return "critical";
+  const total = Math.max(task.dueAt - task.createdAt, HOUR_MS);
+  const frac = remaining / total;
+  if (frac < 0.2 || remaining < 24 * HOUR_MS) return "serious";
+  if (frac < 0.5) return "warning";
+  return "good";
+}
+
+function dueLabel(task, now = Date.now()) {
+  const remaining = task.dueAt - now;
+  if (remaining <= 0) return `Overdue ${formatDuration(-remaining)}`;
+  if (remaining < 24 * HOUR_MS) return `Due in ${formatDuration(remaining)}`;
+  const today = new Date(now);
+  const due = new Date(task.dueAt);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (due.toDateString() === tomorrow.toDateString()) return "Due tomorrow";
+  return `Due ${formatDate(task.dueAt)}`;
+}
+
+/* ============================================================
+   Formatting
+   ============================================================ */
 
 function formatDate(ts) {
   return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -82,12 +380,15 @@ function formatDuration(ms) {
   return `${days < 10 ? days.toFixed(1) : Math.round(days)} d`;
 }
 
-/* ---------- Board rendering ---------- */
+/* ============================================================
+   Board rendering
+   ============================================================ */
 
 function renderBoard() {
+  const now = Date.now();
   for (const status of STATUSES) {
     const container = document.querySelector(`.cards[data-status="${status}"]`);
-    const items = tasks.filter((t) => t.status === status);
+    const items = data.tasks.filter((t) => t.status === status);
     container.innerHTML = "";
     document.querySelector(`[data-count="${status}"]`).textContent = items.length;
 
@@ -102,19 +403,45 @@ function renderBoard() {
       continue;
     }
 
-    for (const task of items) container.appendChild(buildCard(task));
+    for (const task of items) container.appendChild(buildCard(task, now));
   }
+  renderRecurringPanel();
 }
 
-function buildCard(task) {
+function buildCard(task, now) {
   const card = document.createElement("article");
   card.className = "card";
   card.draggable = true;
   card.dataset.id = task.id;
 
+  const urgency = urgencyOf(task, now);
+  if (urgency) card.classList.add(`due-${urgency}`);
+
   const title = document.createElement("div");
   title.className = "card-title";
   title.textContent = task.title;
+  card.appendChild(title);
+
+  const badges = document.createElement("div");
+  if (urgency) {
+    const badge = document.createElement("span");
+    badge.className = `badge due-${urgency}`;
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    badge.append(dot, document.createTextNode(dueLabel(task, now)));
+    badges.appendChild(badge);
+  }
+  if (task.recurringId) {
+    const template = data.recurring.find((r) => r.id === task.recurringId);
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = `↻ ${template ? FREQUENCIES[template.freq].label : "Repeats"}`;
+    badges.appendChild(badge);
+  }
+  if (badges.childNodes.length) {
+    badges.className = "badges";
+    card.appendChild(badges);
+  }
 
   const meta = document.createElement("div");
   meta.className = "card-meta";
@@ -141,7 +468,7 @@ function buildCard(task) {
   actions.append(back, fwd, del);
 
   meta.append(when, actions);
-  card.append(title, meta);
+  card.appendChild(meta);
 
   card.addEventListener("dragstart", (e) => {
     e.dataTransfer.setData("text/plain", task.id);
@@ -182,20 +509,39 @@ for (const zone of document.querySelectorAll(".cards")) {
   });
 }
 
-/* ---------- Add form ---------- */
+/* ============================================================
+   Add form
+   ============================================================ */
 
 const addForm = document.getElementById("add-form");
 const taskInput = document.getElementById("task-input");
+const dueInput = document.getElementById("due-input");
+const recurInput = document.getElementById("recur-input");
+
+function pickedDueAt() {
+  if (!dueInput.value) return null;
+  const [y, m, d] = dueInput.value.split("-").map(Number);
+  return new Date(y, m - 1, d, 23, 59, 59).getTime(); // end of the chosen day, local time
+}
 
 addForm.addEventListener("submit", (e) => {
   e.preventDefault();
-  if (addTask(taskInput.value)) {
-    taskInput.value = "";
-    taskInput.focus();
+  const title = taskInput.value.trim();
+  if (!title) return;
+  if (recurInput.value) {
+    addRecurring(title, recurInput.value, pickedDueAt());
+  } else {
+    addTask(title, { dueAt: pickedDueAt() });
   }
+  taskInput.value = "";
+  dueInput.value = "";
+  recurInput.value = "";
+  taskInput.focus();
 });
 
-/* ---------- Voice input ---------- */
+/* ============================================================
+   Voice input
+   ============================================================ */
 
 const voiceBtn = document.getElementById("voice-btn");
 const voiceStatus = document.getElementById("voice-status");
@@ -224,7 +570,7 @@ if (!SpeechRec) {
       if (result.isFinal) {
         const transcript = result[0].transcript.trim();
         if (transcript) {
-          addTask(transcript);
+          addTask(transcript, { dueAt: pickedDueAt() });
           showToast(`Added: ${transcript}`);
         }
         setVoiceStatus("");
@@ -267,7 +613,9 @@ function setVoiceStatus(text) {
   voiceStatus.hidden = !text;
 }
 
-/* ---------- Toast ---------- */
+/* ============================================================
+   Toast
+   ============================================================ */
 
 const toast = document.getElementById("toast");
 let toastTimer = null;
@@ -279,7 +627,9 @@ function showToast(text) {
   toastTimer = setTimeout(() => (toast.hidden = true), 2600);
 }
 
-/* ---------- Tabs ---------- */
+/* ============================================================
+   Tabs
+   ============================================================ */
 
 const tabBoard = document.getElementById("tab-board");
 const tabStats = document.getElementById("tab-stats");
@@ -299,7 +649,9 @@ function switchTab(showStats) {
 tabBoard.addEventListener("click", () => switchTab(false));
 tabStats.addEventListener("click", () => switchTab(true));
 
-/* ---------- Stats ---------- */
+/* ============================================================
+   Stats
+   ============================================================ */
 
 function weekStart(ts) {
   const d = new Date(ts);
@@ -309,7 +661,7 @@ function weekStart(ts) {
 }
 
 function completedTasks() {
-  return tasks
+  return data.tasks
     .filter((t) => t.status === "done" && t.completedAt)
     .map((t) => ({ ...t, duration: Math.max(0, t.completedAt - t.createdAt) }));
 }
@@ -320,7 +672,7 @@ function average(nums) {
 
 function renderStats() {
   const done = completedTasks();
-  const open = tasks.length - done.length;
+  const open = data.tasks.length - done.length;
 
   document.getElementById("stat-done").textContent = done.length;
   document.getElementById("stat-open").textContent = open;
@@ -358,6 +710,7 @@ function renderStats() {
   renderChart(done);
   renderRanking("list-slowest", done, (a, b) => b.duration - a.duration);
   renderRanking("list-fastest", done, (a, b) => a.duration - b.duration);
+  renderBackupNote();
 }
 
 function renderRanking(elementId, done, comparator) {
@@ -385,7 +738,9 @@ function renderRanking(elementId, done, comparator) {
   }
 }
 
-/* ---------- Weekly average chart (SVG, single series) ---------- */
+/* ============================================================
+   Weekly average chart (SVG, single series)
+   ============================================================ */
 
 const MAX_WEEKS = 12;
 
@@ -546,7 +901,9 @@ function el(tag, attrs, text) {
   return node;
 }
 
-/* ---------- Tooltip ---------- */
+/* ============================================================
+   Tooltip
+   ============================================================ */
 
 const tooltip = document.getElementById("tooltip");
 
@@ -567,11 +924,27 @@ function attachTooltip(target, html) {
   target.addEventListener("pointerleave", () => (tooltip.hidden = true));
 }
 
-/* ---------- Boot ---------- */
+/* ============================================================
+   Boot
+   ============================================================ */
 
 function renderAll() {
   renderBoard();
   if (!viewStats.hidden) renderStats();
 }
 
+runRecurrence();
 renderAll();
+save(); // persist any v1 migration and trigger the daily backup
+
+// Keep recurrence and deadline colors fresh while the app stays open
+setInterval(() => {
+  runRecurrence();
+  renderAll();
+}, 60 * 1000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    runRecurrence();
+    renderAll();
+  }
+});

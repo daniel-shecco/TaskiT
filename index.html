@@ -31,6 +31,24 @@
         </button>
         <button type="submit" class="add-btn">Add</button>
       </form>
+      <div class="add-options">
+        <label class="opt">
+          <span>Due</span>
+          <input type="date" id="due-input" aria-label="Due date" />
+        </label>
+        <label class="opt">
+          <span>Repeat</span>
+          <select id="recur-input" aria-label="Repeat">
+            <option value="">Never</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="halfyearly">Half-yearly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </label>
+      </div>
       <p id="voice-status" class="voice-status" hidden></p>
 
       <div class="board" id="board">
@@ -53,6 +71,11 @@
           <div class="cards" data-status="done"></div>
         </div>
       </div>
+
+      <section id="recurring-panel" class="recurring-panel" hidden>
+        <h2 class="panel-title">↻ Recurring tasks</h2>
+        <ul id="recurring-list" class="recurring-list"></ul>
+      </section>
     </section>
 
     <!-- ============ STATS VIEW ============ -->
@@ -88,6 +111,16 @@
         <div class="list-card">
           <h2 class="chart-title">Fastest tasks</h2>
           <ol id="list-fastest" class="task-ranking"></ol>
+        </div>
+      </div>
+
+      <div class="list-card data-card">
+        <h2 class="chart-title">Your data</h2>
+        <p class="chart-subtitle" id="backup-note">Tasks are saved in this browser and auto-backed up daily (last 3 days kept).</p>
+        <div class="data-actions">
+          <button type="button" id="export-btn" class="secondary-btn">Export JSON</button>
+          <button type="button" id="import-btn" class="secondary-btn">Import JSON</button>
+          <input type="file" id="import-file" accept=".json,application/json" hidden />
         </div>
       </div>
     </section>
