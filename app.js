@@ -46,6 +46,7 @@ function sanitizeTask(t) {
     completedAt: Number.isFinite(t.completedAt) ? t.completedAt : null,
     dueAt: Number.isFinite(t.dueAt) ? t.dueAt : null,
     recurringId: typeof t.recurringId === "string" ? t.recurringId : null,
+    notifiedLevel: ["serious", "critical"].includes(t.notifiedLevel) ? t.notifiedLevel : null,
   };
 }
 
@@ -625,6 +626,85 @@ function setVoiceStatus(text) {
 }
 
 /* ============================================================
+   Deadline notifications (browser) — pings once when a task
+   turns orange (due soon) and once more if it breaches
+   ============================================================ */
+
+const NOTIFY_PREF_KEY = "taskit.notify";
+const notifyBtn = document.getElementById("notify-btn");
+const NOTIFY_RANK = { serious: 1, critical: 2 };
+
+function notificationsGranted() {
+  return "Notification" in window && Notification.permission === "granted";
+}
+
+function notifyEnabled() {
+  return notificationsGranted() && localStorage.getItem(NOTIFY_PREF_KEY) === "on";
+}
+
+function renderNotifyButton() {
+  if (!("Notification" in window)) {
+    notifyBtn.hidden = true;
+    return;
+  }
+  notifyBtn.hidden = false;
+  const on = notifyEnabled();
+  notifyBtn.textContent = on ? "🔔 On" : "🔕 Off";
+  notifyBtn.classList.toggle("is-on", on);
+  notifyBtn.title = on
+    ? "Deadline notifications are on — click to turn off"
+    : "Get a notification when a task is due soon or overdue";
+}
+
+if ("Notification" in window) {
+  notifyBtn.addEventListener("click", async () => {
+    if (notifyEnabled()) {
+      localStorage.setItem(NOTIFY_PREF_KEY, "off");
+    } else {
+      const permission = Notification.permission === "granted"
+        ? "granted"
+        : await Notification.requestPermission();
+      if (permission === "granted") {
+        localStorage.setItem(NOTIFY_PREF_KEY, "on");
+        showToast("Deadline notifications are on");
+        checkDeadlineNotifications();
+      } else if (permission === "denied") {
+        showToast("⚠ Notifications are blocked — allow them in your browser's site settings");
+      }
+    }
+    renderNotifyButton();
+  });
+}
+
+function checkDeadlineNotifications() {
+  if (!notifyEnabled()) return;
+  const now = Date.now();
+  let changed = false;
+  for (const task of data.tasks) {
+    const level = urgencyOf(task, now);
+    if (!NOTIFY_RANK[level]) continue;
+    if ((NOTIFY_RANK[task.notifiedLevel] || 0) >= NOTIFY_RANK[level]) continue;
+    const body = level === "critical"
+      ? `Overdue: ${dueLabel(task, now).replace("Overdue ", "past deadline by ")}`
+      : dueLabel(task, now);
+    try {
+      const n = new Notification(level === "critical" ? `🔴 ${task.title}` : `⏰ ${task.title}`, {
+        body,
+        tag: `taskit-${task.id}`, // replaces the earlier ping for the same task
+        icon: "icon.svg",
+      });
+      n.onclick = () => window.focus();
+      task.notifiedLevel = level;
+      changed = true;
+    } catch {
+      /* some platforms (e.g. Android tabs) only allow notifications via a
+         service worker — fail quietly rather than break the tick */
+    }
+  }
+  if (changed) save();
+}
+
+/* ============================================================
    Toast
    ============================================================ */
 
@@ -973,20 +1053,24 @@ export const bridge = {
 runRecurrence();
 renderAll();
 save(); // persist any v1 migration and trigger the daily backup
+renderNotifyButton();
+checkDeadlineNotifications();
 
 bridge.setSyncNote("Cloud sync: not configured — see SETUP-SYNC.md to enable it.");
 import("./sync.js").catch(() => {
   /* sync module missing or failed to load — local-only mode is fine */
 });
 
-// Keep recurrence and deadline colors fresh while the app stays open
+// Keep recurrence, deadline colors, and notifications fresh while open
 setInterval(() => {
   runRecurrence();
   renderAll();
+  checkDeadlineNotifications();
 }, 60 * 1000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     runRecurrence();
     renderAll();
+    checkDeadlineNotifications();
   }
 });

@@ -29,6 +29,12 @@ browser's `localStorage`.
   duplicate is spawned; after a long absence, missed periods are skipped
   rather than piled up. Manage or stop recurrences in the ↻ panel under the
   board.
+- **Deadline notifications (optional)** — click the 🔕 bell in the header and
+  allow notifications; the app then pings you once when a task is due within
+  24 hours and once more if the deadline is breached. Works while TaskiT is
+  open in a tab or installed as a PWA — no server involved. Each task
+  notifies at most once per level, even across reloads (and across devices,
+  when sync is on).
 - **Cloud sync across devices (optional)** — connect a free Firebase project
   (see [SETUP-SYNC.md](SETUP-SYNC.md)) and sign in with Google to sync your
   board between phone and laptop in real time, with offline support. Without

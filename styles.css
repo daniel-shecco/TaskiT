@@ -75,12 +75,10 @@ main {
   letter-spacing: -0.02em;
 }
 
-/* Tabs hug the right edge; a visible sync button slots in beside them */
-.app-header .tabs { margin-left: auto; }
-.sync-btn:not([hidden]) { margin-left: auto; }
-.sync-btn:not([hidden]) + .tabs { margin-left: 0; }
+/* Title left, everything else hugs the right edge */
+.app-title { margin-right: auto; }
 
-.sync-btn {
+.pill-btn {
   font: inherit;
   font-size: 13px;
   font-weight: 600;
@@ -93,7 +91,8 @@ main {
   white-space: nowrap;
 }
 
-.sync-btn:hover { border-color: var(--series-1); color: var(--series-1); }
+.pill-btn:hover { border-color: var(--series-1); color: var(--series-1); }
+.pill-btn.is-on { color: var(--series-1); border-color: var(--series-1); }
 
 .tabs {
   display: flex;
