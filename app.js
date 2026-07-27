@@ -36,6 +36,12 @@ function advanceBy(ts, freq) {
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]; // display Monday-first
 
+function startOfDay(ts) {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 function endOfDay(ts) {
   const d = new Date(ts);
   d.setHours(23, 59, 59, 999);
@@ -52,10 +58,12 @@ function nextOccurrence(fromTs, days) {
   return endOfDay(fromTs); // unreachable with a non-empty day set
 }
 
+/* Occurrences always land at 00:00 local so "today's card" exists from
+   the morning, regardless of what time of day the recurrence was created */
 function advanceTemplate(template, fromTs) {
   return template.freq === "days"
     ? nextOccurrence(fromTs, template.days)
-    : advanceBy(fromTs, template.freq);
+    : startOfDay(advanceBy(fromTs, template.freq));
 }
 
 function freqLabel(template) {
@@ -102,6 +110,9 @@ function sanitizeRecurring(r) {
     clean.days = days;
   }
   if (!clean.nextAt) clean.nextAt = advanceTemplate(clean, Date.now());
+  // Repair templates saved by older versions that anchored occurrences
+  // to the creation time of day instead of midnight
+  clean.nextAt = startOfDay(clean.nextAt);
   return clean;
 }
 
@@ -758,11 +769,18 @@ editForm.addEventListener("submit", (e) => {
       }
     }
   } else {
+    let isNew = false;
     if (!template) {
       template = { id: makeId(), title, freq: wantFreq };
       data.recurring.push(template);
       task.recurringId = template.id;
+      isNew = true;
     }
+    const sameDays = (a, b) =>
+      Array.isArray(a) && Array.isArray(b) && a.length === b.length &&
+      [...a].sort().every((v, i) => v === [...b].sort()[i]);
+    const scheduleChanged = isNew || template.freq !== wantFreq ||
+      (wantFreq === "days" && !sameDays(template.days, days));
     template.title = title; // future spawns use the edited name
     template.freq = wantFreq;
     if (wantFreq === "days") {
@@ -770,7 +788,9 @@ editForm.addEventListener("submit", (e) => {
     } else {
       delete template.days;
     }
-    template.nextAt = advanceTemplate(template, Date.now());
+    // Only reschedule when the repeat settings changed — a plain rename
+    // must not push the next occurrence forward (it would skip a spawn)
+    if (scheduleChanged) template.nextAt = advanceTemplate(template, Date.now());
   }
 
   save();
