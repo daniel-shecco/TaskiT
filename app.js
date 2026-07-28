@@ -113,6 +113,7 @@ function sanitizeRecurring(r) {
   // Repair templates saved by older versions that anchored occurrences
   // to the creation time of day instead of midnight
   clean.nextAt = startOfDay(clean.nextAt);
+  if (Number.isFinite(r.lastSpawnAt)) clean.lastSpawnAt = r.lastSpawnAt;
   return clean;
 }
 
@@ -293,12 +294,14 @@ function setStatus(id, status) {
   task.status = status;
   task.completedAt = status === "done" ? Date.now() : null;
   save();
+  runRecurrence(); // completing a recurring card may release a pending occurrence
   renderAll();
 }
 
 function removeTask(id) {
   data.tasks = data.tasks.filter((t) => t.id !== id);
   save();
+  runRecurrence(); // deleting a recurring card may release a pending occurrence
   renderAll();
 }
 
@@ -324,6 +327,7 @@ function addRecurring(title, freq, firstDueAt, days = null) {
   const template = { id: makeId(), title: title.trim(), freq };
   if (freq === "days") template.days = days;
   template.nextAt = advanceTemplate(template, now);
+  template.lastSpawnAt = now;
   data.recurring.push(template);
   // First occurrence lands on the board right away. Day-based tasks are
   // due by the end of their day (today if it's a chosen day, else the next one)
@@ -352,31 +356,62 @@ function hasOpenInstance(recurringId) {
 
 /**
  * Spawns due occurrences. After a long absence, missed periods are
- * skipped rather than piled up — at most one new card per template,
- * and none while a previous instance is still open.
+ * skipped rather than piled up — at most one new card per template.
+ * While a previous instance is still open, the due occurrence stays
+ * PENDING (nextAt keeps pointing at it) instead of being consumed, so
+ * finishing or deleting the open card releases it immediately.
  */
 function runRecurrence() {
   const now = Date.now();
+  const todayStart = startOfDay(now);
+  const todayDay = new Date(now).getDay();
   let changed = false;
   for (const template of data.recurring) {
-    let due = false;
-    while (template.nextAt <= now) {
-      template.nextAt = advanceTemplate(template, template.nextAt);
-      due = true;
-      changed = true;
+    if (template.nextAt > now) {
+      // Self-heal: older versions consumed a blocked occurrence, leaving
+      // the schedule in the future with no card spawned today. If today
+      // is an occurrence day and nothing spawned or blocks, pull it back.
+      const occursToday =
+        template.freq === "daily" ||
+        (template.freq === "days" && template.days.includes(todayDay));
+      const spawnedToday =
+        (template.lastSpawnAt || 0) >= todayStart ||
+        data.tasks.some((t) => t.recurringId === template.id && t.createdAt >= todayStart);
+      if (occursToday && !spawnedToday && !hasOpenInstance(template.id)) {
+        template.nextAt = todayStart;
+        changed = true;
+      } else {
+        continue;
+      }
     }
-    if (due && !hasOpenInstance(template.id)) {
-      data.tasks.unshift({
-        id: makeId(),
-        title: template.title,
-        status: "backlog",
-        createdAt: now,
-        completedAt: null,
-        // Day-based tasks are for that day; others run until the next occurrence
-        dueAt: template.freq === "days" ? endOfDay(now) : template.nextAt,
-        recurringId: template.id,
-      });
+    // Fast-forward to the latest occurrence that is already due,
+    // discarding older missed ones
+    let latest = template.nextAt;
+    let next = advanceTemplate(template, latest);
+    while (next <= now) {
+      latest = next;
+      next = advanceTemplate(template, latest);
     }
+    if (hasOpenInstance(template.id)) {
+      if (template.nextAt !== latest) {
+        template.nextAt = latest; // still due — spawns once unblocked
+        changed = true;
+      }
+      continue;
+    }
+    template.nextAt = next;
+    template.lastSpawnAt = now;
+    changed = true;
+    data.tasks.unshift({
+      id: makeId(),
+      title: template.title,
+      status: "backlog",
+      createdAt: now,
+      completedAt: null,
+      // Day-based tasks are for that day; others run until the next occurrence
+      dueAt: template.freq === "days" ? endOfDay(now) : next,
+      recurringId: template.id,
+    });
   }
   if (changed) {
     save();
