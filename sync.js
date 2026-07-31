@@ -133,6 +133,7 @@ async function push() {
       version: d.version,
       tasks: d.tasks,
       recurring: d.recurring,
+      categories: d.categories || [],
       updatedAt: d.updatedAt || Date.now(),
     });
   } catch {

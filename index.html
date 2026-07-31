@@ -39,6 +39,11 @@
           <input type="date" id="due-input" aria-label="Due date" />
         </label>
         <label class="opt">
+          <span>Category</span>
+          <input type="text" id="cat-input" list="cat-list" placeholder="None" maxlength="40" aria-label="Category" />
+        </label>
+        <datalist id="cat-list"></datalist>
+        <label class="opt">
           <span>Repeat</span>
           <select id="recur-input" aria-label="Repeat">
             <option value="">Never</option>
@@ -116,6 +121,14 @@
         <p id="chart-empty" class="empty-note" hidden>Finish a few tasks and your trend will show up here.</p>
       </div>
 
+      <div class="chart-card viz-root">
+        <h2 class="chart-title">Completed per week by category</h2>
+        <p class="chart-subtitle">Number of tasks finished each week, stacked by category</p>
+        <div id="cat-legend" class="cat-legend"></div>
+        <div id="cat-chart" class="chart"></div>
+        <p id="cat-chart-empty" class="empty-note" hidden>Finish a few tasks and the category breakdown will show up here.</p>
+      </div>
+
       <div class="lists-row">
         <div class="list-card">
           <h2 class="chart-title">Slowest tasks</h2>
@@ -150,6 +163,10 @@
       <label class="dialog-field">
         <span>Due date</span>
         <input id="edit-due" type="date" />
+      </label>
+      <label class="dialog-field">
+        <span>Category</span>
+        <input id="edit-category" type="text" list="cat-list" placeholder="None" maxlength="40" />
       </label>
       <label class="dialog-field">
         <span>Repeat</span>

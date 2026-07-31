@@ -89,6 +89,7 @@ function sanitizeTask(t) {
     dueAt: Number.isFinite(t.dueAt) ? t.dueAt : null,
     recurringId: typeof t.recurringId === "string" ? t.recurringId : null,
     notifiedLevel: ["serious", "critical"].includes(t.notifiedLevel) ? t.notifiedLevel : null,
+    category: typeof t.category === "string" && t.category.trim() ? t.category.trim().slice(0, 40) : null,
   };
 }
 
@@ -114,6 +115,9 @@ function sanitizeRecurring(r) {
   // to the creation time of day instead of midnight
   clean.nextAt = startOfDay(clean.nextAt);
   if (Number.isFinite(r.lastSpawnAt)) clean.lastSpawnAt = r.lastSpawnAt;
+  if (typeof r.category === "string" && r.category.trim()) {
+    clean.category = r.category.trim().slice(0, 40);
+  }
   return clean;
 }
 
@@ -124,10 +128,23 @@ function sanitizeData(raw) {
   const recurring = Array.isArray(raw.recurring)
     ? raw.recurring.map(sanitizeRecurring).filter(Boolean)
     : [];
+  // Category list: stored order defines the (stable) color slot; any
+  // category used on a task/template but missing from the list is appended
+  const categories = [];
+  const addCat = (name) => {
+    if (typeof name === "string" && name.trim()) {
+      const clean = name.trim().slice(0, 40);
+      if (!categories.includes(clean) && categories.length < 50) categories.push(clean);
+    }
+  };
+  if (Array.isArray(raw.categories)) raw.categories.forEach(addCat);
+  tasks.forEach((t) => addCat(t.category));
+  recurring.forEach((r) => addCat(r.category));
   return {
     version: SCHEMA_VERSION,
     tasks,
     recurring,
+    categories,
     updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : 0,
   };
 }
@@ -162,7 +179,7 @@ function loadData() {
     const parsed = tryParse(`{"tasks": ${legacy}}`);
     if (parsed) return parsed;
   }
-  return { version: SCHEMA_VERSION, tasks: [], recurring: [], updatedAt: 0 };
+  return { version: SCHEMA_VERSION, tasks: [], recurring: [], categories: [], updatedAt: 0 };
 }
 
 function backupMeta() {
@@ -270,7 +287,15 @@ function makeId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
-function addTask(title, { dueAt = null, recurringId = null } = {}) {
+function ensureCategory(name) {
+  if (!name) return null;
+  const clean = name.trim().slice(0, 40);
+  if (!clean) return null;
+  if (!data.categories.includes(clean)) data.categories.push(clean);
+  return clean;
+}
+
+function addTask(title, { dueAt = null, recurringId = null, category = null } = {}) {
   const trimmed = title.trim();
   if (!trimmed) return null;
   const task = {
@@ -281,6 +306,7 @@ function addTask(title, { dueAt = null, recurringId = null } = {}) {
     completedAt: null,
     dueAt,
     recurringId,
+    category: ensureCategory(category),
   };
   data.tasks.unshift(task);
   save();
@@ -322,12 +348,14 @@ function boardComparator(status) {
    Recurring tasks — a template spawns a fresh card each period
    ============================================================ */
 
-function addRecurring(title, freq, firstDueAt, days = null) {
+function addRecurring(title, freq, firstDueAt, days = null, category = null) {
   const now = Date.now();
   const template = { id: makeId(), title: title.trim(), freq };
   if (freq === "days") template.days = days;
   template.nextAt = advanceTemplate(template, now);
   template.lastSpawnAt = now;
+  const cat = ensureCategory(category);
+  if (cat) template.category = cat;
   data.recurring.push(template);
   // First occurrence lands on the board right away. Day-based tasks are
   // due by the end of their day (today if it's a chosen day, else the next one)
@@ -337,6 +365,7 @@ function addRecurring(title, freq, firstDueAt, days = null) {
   addTask(title, {
     dueAt: firstDueAt || defaultDue,
     recurringId: template.id,
+    category: cat,
   });
 }
 
@@ -411,6 +440,7 @@ function runRecurrence() {
       // Day-based tasks are for that day; others run until the next occurrence
       dueAt: template.freq === "days" ? endOfDay(now) : next,
       recurringId: template.id,
+      category: template.category || null,
     });
   }
   if (changed) {
@@ -576,6 +606,15 @@ function buildCard(task, now) {
     badge.textContent = `↻ ${template ? freqLabel(template) : "Repeats"}`;
     badges.appendChild(badge);
   }
+  if (task.category) {
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.style.background = categoryColor(task.category);
+    badge.append(dot, document.createTextNode(task.category));
+    badges.appendChild(badge);
+  }
   if (badges.childNodes.length) {
     badges.className = "badges";
     card.appendChild(badges);
@@ -653,6 +692,26 @@ const addForm = document.getElementById("add-form");
 const taskInput = document.getElementById("task-input");
 const dueInput = document.getElementById("due-input");
 const recurInput = document.getElementById("recur-input");
+const catInput = document.getElementById("cat-input");
+
+/* Category color: slot by position in the (stable) category list;
+   9th and later fold to the neutral gray, never a generated hue */
+function categoryColor(name) {
+  const styles = getComputedStyle(document.documentElement);
+  const idx = name ? data.categories.indexOf(name) : -1;
+  const varName = idx >= 0 && idx < 8 ? `--cat-${idx + 1}` : "--cat-none";
+  return styles.getPropertyValue(varName).trim();
+}
+
+function renderCategoryDatalist() {
+  const list = document.getElementById("cat-list");
+  list.innerHTML = "";
+  for (const name of data.categories) {
+    const opt = document.createElement("option");
+    opt.value = name;
+    list.appendChild(opt);
+  }
+}
 const daysPicker = document.getElementById("days-picker");
 
 /* Day-picker helpers, shared by the add form and the edit dialog */
@@ -704,21 +763,23 @@ addForm.addEventListener("submit", (e) => {
   e.preventDefault();
   const title = taskInput.value.trim();
   if (!title) return;
+  const category = catInput.value.trim() || null;
   if (recurInput.value === "days") {
     const days = pickerDays(daysPicker);
     if (days.length === 0) {
       showToast("Pick at least one day for the repeat");
       return;
     }
-    addRecurring(title, "days", pickedDueAt(), days);
+    addRecurring(title, "days", pickedDueAt(), days, category);
   } else if (recurInput.value) {
-    addRecurring(title, recurInput.value, pickedDueAt());
+    addRecurring(title, recurInput.value, pickedDueAt(), null, category);
   } else {
-    addTask(title, { dueAt: pickedDueAt() });
+    addTask(title, { dueAt: pickedDueAt(), category });
   }
   taskInput.value = "";
   dueInput.value = "";
   recurInput.value = "";
+  catInput.value = "";
   resetDaysPicker();
   taskInput.focus();
 });
@@ -731,6 +792,7 @@ const editDialog = document.getElementById("edit-dialog");
 const editForm = document.getElementById("edit-form");
 const editTitle = document.getElementById("edit-title");
 const editDue = document.getElementById("edit-due");
+const editCategory = document.getElementById("edit-category");
 const editRecur = document.getElementById("edit-recur");
 const editDaysPicker = document.getElementById("edit-days-picker");
 
@@ -749,6 +811,7 @@ function openEdit(id) {
   editTitle.value = task.title;
   editingOriginalDue = dueAtToDateInput(task.dueAt);
   editDue.value = editingOriginalDue;
+  editCategory.value = task.category || "";
 
   const template = task.recurringId
     ? data.recurring.find((r) => r.id === task.recurringId)
@@ -784,6 +847,7 @@ editForm.addEventListener("submit", (e) => {
   }
 
   task.title = title;
+  task.category = ensureCategory(editCategory.value) || null;
 
   // Only touch the deadline if the date field actually changed,
   // so an untouched field keeps the exact original due time
@@ -817,6 +881,11 @@ editForm.addEventListener("submit", (e) => {
     const scheduleChanged = isNew || template.freq !== wantFreq ||
       (wantFreq === "days" && !sameDays(template.days, days));
     template.title = title; // future spawns use the edited name
+    if (task.category) {
+      template.category = task.category;
+    } else {
+      delete template.category;
+    }
     template.freq = wantFreq;
     if (wantFreq === "days") {
       template.days = days;
@@ -865,7 +934,7 @@ if (!SpeechRec) {
       if (result.isFinal) {
         const transcript = result[0].transcript.trim();
         if (transcript) {
-          addTask(transcript, { dueAt: pickedDueAt() });
+          addTask(transcript, { dueAt: pickedDueAt(), category: catInput.value.trim() || null });
           showToast(`Added: ${transcript}`);
         }
         setVoiceStatus("");
@@ -1085,6 +1154,7 @@ function renderStats() {
   }
 
   renderChart(done);
+  renderCategoryChart(done);
   renderRanking("list-slowest", done, (a, b) => b.duration - a.duration);
   renderRanking("list-fastest", done, (a, b) => a.duration - b.duration);
   renderBackupNote();
@@ -1248,6 +1318,171 @@ function renderChart(done) {
   host.appendChild(svg);
 }
 
+/* ============================================================
+   Category breakdown chart — tasks completed per week, stacked
+   ============================================================ */
+
+function renderCategoryChart(done) {
+  const host = document.getElementById("cat-chart");
+  const legendHost = document.getElementById("cat-legend");
+  const emptyNote = document.getElementById("cat-chart-empty");
+  host.innerHTML = "";
+  legendHost.innerHTML = "";
+  const buckets = weeklyBuckets(done);
+  const hasData = buckets.some((b) => b.count > 0);
+  emptyNote.hidden = hasData;
+  if (!hasData) return;
+
+  // Series: categories in slot order (only those used), then Other/None
+  const NONE = "No category";
+  const OTHER = "Other";
+  const usedNames = new Set(done.map((t) => t.category || NONE));
+  const series = data.categories
+    .slice(0, 8)
+    .filter((name) => usedNames.has(name))
+    .map((name) => ({ name, color: categoryColor(name) }));
+  const styles = getComputedStyle(document.documentElement);
+  const grayColor = styles.getPropertyValue("--cat-none").trim();
+  const overflow = data.categories.slice(8).some((name) => usedNames.has(name));
+  if (overflow) series.push({ name: OTHER, color: grayColor });
+  if (usedNames.has(NONE)) series.push({ name: NONE, color: grayColor });
+
+  const keyOf = (t) => {
+    if (!t.category) return NONE;
+    const idx = data.categories.indexOf(t.category);
+    return idx >= 0 && idx < 8 ? t.category : OTHER;
+  };
+
+  // Weekly counts per series
+  const byWeek = new Map(buckets.map((b) => [b.week, new Map()]));
+  for (const t of done) {
+    const wk = weekStart(t.completedAt);
+    const weekMap = byWeek.get(wk);
+    if (!weekMap) continue; // outside the charted window
+    const key = keyOf(t);
+    weekMap.set(key, (weekMap.get(key) || 0) + 1);
+  }
+
+  // Legend (identity is never color-alone: dot + name)
+  for (const s of series) {
+    const item = document.createElement("span");
+    item.className = "legend-item";
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.style.background = s.color;
+    item.append(dot, document.createTextNode(s.name));
+    legendHost.appendChild(item);
+  }
+
+  const W = 640, H = 240;
+  const pad = { top: 16, right: 12, bottom: 28, left: 40 };
+  const plotW = W - pad.left - pad.right;
+  const plotH = H - pad.top - pad.bottom;
+
+  const maxTotal = Math.max(...buckets.map((b) => {
+    const m = byWeek.get(b.week);
+    return [...m.values()].reduce((a, v) => a + v, 0);
+  }), 1);
+  const yMax = [4, 8, 12, 16, 24, 40, 80, 160].find((s) => maxTotal <= s) || Math.ceil(maxTotal / 40) * 40;
+  const barSlot = plotW / buckets.length;
+  const barW = Math.min(48, Math.max(10, barSlot - 8));
+
+  const ink = {
+    grid: styles.getPropertyValue("--gridline").trim(),
+    baseline: styles.getPropertyValue("--baseline").trim(),
+    muted: styles.getPropertyValue("--text-muted").trim(),
+  };
+
+  const svg = el("svg", {
+    viewBox: `0 0 ${W} ${H}`,
+    role: "img",
+    "aria-label": "Stacked bar chart of tasks completed per week, by category",
+  });
+
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const value = (yMax / ticks) * i;
+    const y = pad.top + plotH - (value / yMax) * plotH;
+    if (i > 0) {
+      svg.appendChild(el("line", {
+        x1: pad.left, x2: W - pad.right, y1: y, y2: y,
+        stroke: ink.grid, "stroke-width": 1,
+      }));
+    }
+    svg.appendChild(el("text", {
+      x: pad.left - 8, y: y + 4, "text-anchor": "end",
+      "font-size": 11, fill: ink.muted,
+    }, String(value % 1 === 0 ? value : value.toFixed(1))));
+  }
+
+  svg.appendChild(el("line", {
+    x1: pad.left, x2: W - pad.right,
+    y1: pad.top + plotH, y2: pad.top + plotH,
+    stroke: ink.baseline, "stroke-width": 1,
+  }));
+
+  const labelEvery = buckets.length > 8 ? 2 : 1;
+
+  buckets.forEach((b, i) => {
+    const cx = pad.left + barSlot * i + barSlot / 2;
+    if (i % labelEvery === 0) {
+      svg.appendChild(el("text", {
+        x: cx, y: H - 8, "text-anchor": "middle",
+        "font-size": 11, fill: ink.muted,
+      }, formatDate(b.week)));
+    }
+
+    const weekMap = byWeek.get(b.week);
+    const counts = series.map((s) => weekMap.get(s.name) || 0);
+    const total = counts.reduce((a, v) => a + v, 0);
+    if (total === 0) return;
+
+    const x = cx - barW / 2;
+    const baseY = pad.top + plotH;
+    let cum = 0;
+    const topIdx = counts.reduce((acc, v, idx) => (v > 0 ? idx : acc), 0);
+    counts.forEach((count, si) => {
+      if (count === 0) return;
+      const h = (count / yMax) * plotH;
+      const yTop = baseY - ((cum + count) / yMax) * plotH;
+      if (si === topIdx) {
+        const r = Math.min(4, h, barW / 2);
+        svg.appendChild(el("path", {
+          class: "bar",
+          d: roundedTopBar(x, yTop, barW, Math.max(2, h - 1), r),
+          fill: series[si].color,
+        }));
+      } else {
+        // 2px surface gap between stacked segments
+        svg.appendChild(el("rect", {
+          class: "bar",
+          x, y: yTop + 1, width: barW, height: Math.max(1, h - 2),
+          fill: series[si].color,
+        }));
+      }
+      cum += count;
+    });
+
+    const hit = el("rect", {
+      x: pad.left + barSlot * i, y: pad.top,
+      width: barSlot, height: plotH,
+      fill: "transparent",
+    });
+    attachTooltip(hit, () =>
+      `<div class="tt-title">Week of ${formatDate(b.week)}</div>` +
+      series
+        .map((s, si) => ({ s, count: counts[si] }))
+        .filter((e) => e.count > 0)
+        .map((e) => `<div>${e.s.name}: ${e.count}</div>`)
+        .join("") +
+      `<div class="tt-sub">${total} total</div>`
+    );
+    svg.appendChild(hit);
+  });
+
+  host.appendChild(svg);
+}
+
 function niceCeil(value) {
   // Ceilings divisible by 4 so the gridline ticks land on round values
   const steps = [0.25, 0.5, 1, 2, 4, 8, 12, 16, 24, 48, 96, 180, 360];
@@ -1307,6 +1542,7 @@ function attachTooltip(target, html) {
 
 function renderAll() {
   renderBoard();
+  renderCategoryDatalist();
   if (!viewStats.hidden) renderStats();
 }
 

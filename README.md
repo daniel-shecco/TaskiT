@@ -21,9 +21,16 @@ browser's `localStorage`.
   keep the Done column tidy. Nothing is deleted: archived tasks stay in your
   data, sync, exports, and all statistics; the Done column shows a "🗄 N
   archived" note and the Stats tab counts them.
+- **Categories** — tag tasks with a category (e.g. Fitness, Savings,
+  Intellectual growth). Type anything in the Category field; previously used
+  names are suggested. Cards show a color-coded category badge, recurring
+  tasks pass their category to every spawned card, and each category keeps a
+  stable color (9th and later fold to gray in charts).
 - **Stats view** — see how your pace changes over time:
   - Average time-to-done, with a trend vs. the previous 4 weeks.
   - A weekly chart of average completion time (hover a bar for details).
+  - A stacked weekly chart of tasks completed **by category**, with legend
+    and per-week tooltips.
   - Your 5 slowest and 5 fastest tasks.
 - **Voice input** — tap the microphone, say your task, and it's added to the
   backlog. Uses the browser's built-in speech recognition.
