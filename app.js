@@ -1379,11 +1379,12 @@ function renderCategoryChart(done) {
   const plotW = W - pad.left - pad.right;
   const plotH = H - pad.top - pad.bottom;
 
-  const maxTotal = Math.max(...buckets.map((b) => {
+  // Grouped bars: the scale follows the largest single category-week count
+  const maxSingle = Math.max(...buckets.map((b) => {
     const m = byWeek.get(b.week);
-    return [...m.values()].reduce((a, v) => a + v, 0);
+    return m.size ? Math.max(...m.values()) : 0;
   }), 1);
-  const yMax = [4, 8, 12, 16, 24, 40, 80, 160].find((s) => maxTotal <= s) || Math.ceil(maxTotal / 40) * 40;
+  const yMax = [4, 8, 12, 16, 24, 40, 80, 160].find((s) => maxSingle <= s) || Math.ceil(maxSingle / 40) * 40;
   const barSlot = plotW / buckets.length;
   const barW = Math.min(48, Math.max(10, barSlot - 8));
 
@@ -1396,7 +1397,7 @@ function renderCategoryChart(done) {
   const svg = el("svg", {
     viewBox: `0 0 ${W} ${H}`,
     role: "img",
-    "aria-label": "Stacked bar chart of tasks completed per week, by category",
+    "aria-label": "Grouped bar chart of tasks completed per week, by category",
   });
 
   const ticks = 4;
@@ -1437,30 +1438,22 @@ function renderCategoryChart(done) {
     const total = counts.reduce((a, v) => a + v, 0);
     if (total === 0) return;
 
-    const x = cx - barW / 2;
+    // Grouped bars: one thin bar per category, side by side, 2px apart
+    const gap = 2;
+    const groupW = Math.min(barW * 1.4, barSlot - 6);
+    const subW = Math.max(3, (groupW - gap * (series.length - 1)) / series.length);
+    const startX = cx - (subW * series.length + gap * (series.length - 1)) / 2;
     const baseY = pad.top + plotH;
-    let cum = 0;
-    const topIdx = counts.reduce((acc, v, idx) => (v > 0 ? idx : acc), 0);
     counts.forEach((count, si) => {
       if (count === 0) return;
-      const h = (count / yMax) * plotH;
-      const yTop = baseY - ((cum + count) / yMax) * plotH;
-      if (si === topIdx) {
-        const r = Math.min(4, h, barW / 2);
-        svg.appendChild(el("path", {
-          class: "bar",
-          d: roundedTopBar(x, yTop, barW, Math.max(2, h - 1), r),
-          fill: series[si].color,
-        }));
-      } else {
-        // 2px surface gap between stacked segments
-        svg.appendChild(el("rect", {
-          class: "bar",
-          x, y: yTop + 1, width: barW, height: Math.max(1, h - 2),
-          fill: series[si].color,
-        }));
-      }
-      cum += count;
+      const h = Math.max(2, (count / yMax) * plotH);
+      const x = startX + si * (subW + gap);
+      const r = Math.min(3, h, subW / 2);
+      svg.appendChild(el("path", {
+        class: "bar",
+        d: roundedTopBar(x, baseY - h, subW, h, r),
+        fill: series[si].color,
+      }));
     });
 
     const hit = el("rect", {
