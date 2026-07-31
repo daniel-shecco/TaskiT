@@ -458,8 +458,15 @@ function renderRecurringPanel() {
     const li = document.createElement("li");
     const title = document.createElement("span");
     title.className = "r-title";
-    title.textContent = r.title;
-    title.title = r.title;
+    if (r.category) {
+      const dot = document.createElement("span");
+      dot.className = "r-cat-dot";
+      dot.style.background = categoryColor(r.category);
+      dot.title = r.category;
+      title.appendChild(dot);
+    }
+    title.appendChild(document.createTextNode(r.title));
+    title.title = r.category ? `${r.title} — ${r.category}` : r.title;
     const meta = document.createElement("span");
     meta.className = "r-meta";
     meta.textContent = `${freqLabel(r)} · next ${formatDate(r.nextAt)}`;
@@ -885,6 +892,11 @@ editForm.addEventListener("submit", (e) => {
       template.category = task.category;
     } else {
       delete template.category;
+    }
+    // The category is a property of the recurrence: keep every card of
+    // this recurrence (past and open) consistent with it
+    for (const t of data.tasks) {
+      if (t.recurringId === template.id) t.category = task.category;
     }
     template.freq = wantFreq;
     if (wantFreq === "days") {
