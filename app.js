@@ -910,6 +910,7 @@ editForm.addEventListener("submit", (e) => {
   }
 
   save();
+  runRecurrence(); // recurrence changes may make an occurrence due right now
   renderAll();
   editDialog.close();
   showToast("Task updated");
