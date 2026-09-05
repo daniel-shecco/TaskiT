@@ -6,21 +6,26 @@ browser's `localStorage`.
 
 ## Features
 
-- **Kanban board** with three statuses: **Backlog → In Progress → Done**.
-  Drag & drop cards between columns on desktop, or use the ◀ / ▶ buttons on
-  each card (handy on phones). On small screens the columns become swipeable.
-  Open columns are sorted by urgency — overdue first, then nearest deadline,
-  then no-deadline tasks; Done shows the most recently finished first.
+- **Kanban board** with four columns: **Backlog → In Progress → Done**, plus
+  **Not Done** for things you missed outright. Drag & drop cards between
+  columns on desktop, or use the ◀ / ▶ buttons on each card (handy on phones).
+  On small screens the columns become swipeable. Open columns are sorted by
+  urgency — overdue first, then nearest deadline, then no-deadline tasks;
+  Done and Not Done show the most recent first.
+- **Not Done** — the ⊘ button on any open card marks it missed, for work you
+  couldn't do and won't carry over. A missed recurring task releases its next
+  occurrence exactly like completing it does, so tomorrow's card still shows
+  up. The ↩ button puts a card back in the backlog if you change your mind.
 - **Edit in place** — the ✎ button (or double-click) opens an edit dialog to
   rename a task, change or clear its due date, and add, change, or remove its
   recurrence — including turning an existing task into a recurring one.
 - **Creation & completion dates** — every task records when it was created;
   moving a card to *Done* stamps its completion time. Done cards show how long
   they took (✓ 3.2 d, ✓ 45 min, …).
-- **Auto-archive** — done cards leave the board 7 days after completion to
-  keep the Done column tidy. Nothing is deleted: archived tasks stay in your
-  data, sync, exports, and all statistics; the Done column shows a "🗄 N
-  archived" note and the Stats tab counts them.
+- **Auto-archive** — done and not-done cards leave the board 7 days after they
+  were finished or missed, keeping those columns tidy. Nothing is deleted:
+  archived tasks stay in your data, sync, exports, and all statistics; the
+  column shows a "🗄 N archived" note and the Stats tab counts them.
 - **Categories** — tag tasks with a category (e.g. Fitness, Savings,
   Intellectual growth). Type anything in the Category field; previously used
   names are suggested. Cards show a color-coded category badge, recurring
@@ -29,8 +34,11 @@ browser's `localStorage`.
 - **Stats view** — see how your pace changes over time:
   - Average time-to-done, with a trend vs. the previous 4 weeks.
   - A weekly chart of average completion time (hover a bar for details).
-  - A stacked weekly chart of tasks completed **by category**, with legend
-    and per-week tooltips.
+  - A weekly chart of tasks completed **by category**, one bar per category,
+    with legend and per-week tooltips.
+  - **Not done, week over week** — a table of how many times each task was
+    missed in each of the last 6 weeks, most-missed first, with per-week and
+    per-task totals, plus a "Missed this week" tile comparing to last week.
   - Your 5 slowest and 5 fastest tasks.
 - **Voice input** — tap the microphone, say your task, and it's added to the
   backlog. Uses the browser's built-in speech recognition.

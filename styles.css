@@ -262,9 +262,14 @@ main {
 /* ---------- Board ---------- */
 .board {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
   margin-top: 10px;
+}
+
+/* Tablets: two columns per row rather than four cramped ones */
+@media (max-width: 1000px) and (min-width: 721px) {
+  .board { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* Phones: one column per screen, swipe between them */
@@ -391,17 +396,23 @@ main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 2px 8px;
   margin-top: 8px;
   font-size: 12px;
   color: var(--text-muted);
 }
 
+/* Keep the timestamp on one line; the button row wraps below it when tight */
+.card-meta > span:first-child { white-space: nowrap; }
+
 .card-duration { color: var(--text-secondary); font-weight: 600; }
+.card-missed { color: var(--status-critical); font-weight: 600; }
 
 .card-actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
+  margin-left: auto;
 }
 
 .card-actions button {
@@ -410,16 +421,17 @@ main {
   color: var(--text-muted);
   font-size: 15px;
   line-height: 1;
-  padding: 6px;
+  padding: 6px 4px;
   border-radius: 6px;
   cursor: pointer;
-  min-width: 30px;
+  min-width: 28px;
   min-height: 30px;
 }
 
 .card-actions button:hover { background: var(--gridline); color: var(--text-primary); }
 .card-actions button:disabled { opacity: 0.25; cursor: default; }
 .card-actions .delete-btn:hover { color: var(--danger); }
+.card-actions .miss-btn:hover { color: var(--status-critical); }
 
 .empty-note {
   color: var(--text-muted);
@@ -523,7 +535,7 @@ main {
 /* ---------- Stats ---------- */
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
   margin: 10px 0 12px;
 }
@@ -649,6 +661,66 @@ main {
   color: var(--text-secondary);
   font-weight: 600;
   white-space: nowrap;
+}
+
+/* ---------- Not-done table ---------- */
+.table-scroll {
+  overflow-x: auto;
+  margin-top: 10px;
+}
+
+.missed-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.missed-table th,
+.missed-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-top: 1px solid var(--gridline);
+  white-space: nowrap;
+}
+
+.missed-table thead th {
+  border-top: none;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.missed-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.missed-table tbody .num { color: var(--text-primary); }
+.missed-table .zero { color: var(--text-muted); }
+
+.missed-table .t-name {
+  font-weight: 500;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.missed-table tbody .t-name { color: var(--text-primary); }
+
+.missed-table .total-col {
+  font-weight: 700;
+  border-left: 1px solid var(--gridline);
+}
+
+.missed-table .is-current { background: var(--page); }
+
+.missed-table tfoot th,
+.missed-table tfoot td {
+  border-top: 2px solid var(--baseline);
+  font-weight: 700;
+  color: var(--text-secondary);
 }
 
 /* ---------- Edit dialog ---------- */

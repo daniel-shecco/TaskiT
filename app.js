@@ -11,7 +11,22 @@ const BACKUP_KEYS = ["taskit.backup.a", "taskit.backup.b", "taskit.backup.c"];
 const BACKUP_META_KEY = "taskit.backup.meta";
 const SCHEMA_VERSION = 2;
 
-const STATUSES = ["backlog", "progress", "done"];
+const STATUSES = ["backlog", "progress", "done", "missed"];
+/* Columns a card flows through with the ◀ / ▶ buttons; "missed" is a
+   terminal state reached from its own button or by dragging */
+const FLOW = ["backlog", "progress", "done"];
+const TERMINAL = ["done", "missed"];
+
+function isTerminal(task) {
+  return TERMINAL.includes(task.status);
+}
+
+/* When a card left the board for good — completion or a miss */
+function terminalAt(task) {
+  if (task.status === "done") return task.completedAt;
+  if (task.status === "missed") return task.missedAt;
+  return null;
+}
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -88,6 +103,7 @@ function sanitizeTask(t) {
     status: STATUSES.includes(t.status) ? t.status : "backlog",
     createdAt: Number.isFinite(t.createdAt) ? t.createdAt : Date.now(),
     completedAt: Number.isFinite(t.completedAt) ? t.completedAt : null,
+    missedAt: Number.isFinite(t.missedAt) ? t.missedAt : null,
     dueAt: Number.isFinite(t.dueAt) ? t.dueAt : null,
     recurringId: typeof t.recurringId === "string" ? t.recurringId : null,
     notifiedLevel: ["serious", "critical"].includes(t.notifiedLevel) ? t.notifiedLevel : null,
@@ -319,10 +335,13 @@ function addTask(title, { dueAt = null, recurringId = null, category = null } = 
 function setStatus(id, status) {
   const task = data.tasks.find((t) => t.id === id);
   if (!task || !STATUSES.includes(status) || task.status === status) return;
+  const now = Date.now();
   task.status = status;
-  task.completedAt = status === "done" ? Date.now() : null;
+  task.completedAt = status === "done" ? now : null;
+  task.missedAt = status === "missed" ? now : null;
   save();
-  runRecurrence(); // completing a recurring card may release a pending occurrence
+  // Completing OR missing a recurring card may release a pending occurrence
+  runRecurrence();
   renderAll();
 }
 
@@ -335,9 +354,11 @@ function removeTask(id) {
 
 /* Column order: open columns show the most urgent deadline first
    (overdue at the very top), then no-deadline tasks newest-first;
-   the Done column shows the most recently finished first. */
+   the terminal columns show the most recent first. */
 function boardComparator(status) {
-  if (status === "done") return (a, b) => (b.completedAt || 0) - (a.completedAt || 0);
+  if (TERMINAL.includes(status)) {
+    return (a, b) => (terminalAt(b) || 0) - (terminalAt(a) || 0);
+  }
   return (a, b) => {
     const ad = a.dueAt || Infinity;
     const bd = b.dueAt || Infinity;
@@ -381,8 +402,10 @@ function stopRecurring(id) {
   renderAll();
 }
 
+/* A card blocks the next occurrence only while it is still actionable —
+   marking it missed releases the next one exactly like completing it */
 function hasOpenInstance(recurringId) {
-  return data.tasks.some((t) => t.recurringId === recurringId && t.status !== "done");
+  return data.tasks.some((t) => t.recurringId === recurringId && !isTerminal(t));
 }
 
 /**
@@ -492,7 +515,7 @@ function renderRecurringPanel() {
    ============================================================ */
 
 function urgencyOf(task, now = Date.now()) {
-  if (!task.dueAt || task.status === "done") return null;
+  if (!task.dueAt || isTerminal(task)) return null;
   const remaining = task.dueAt - now;
   if (remaining <= 0) return "critical";
   const total = Math.max(task.dueAt - task.createdAt, HOUR_MS);
@@ -535,16 +558,17 @@ function formatDuration(ms) {
    Board rendering
    ============================================================ */
 
-/* Done cards older than this leave the board (but stay in the data,
-   the stats, sync, and exports) */
+/* Finished cards (done or missed) older than this leave the board, but
+   stay in the data, the stats, sync, and exports */
 const ARCHIVE_AFTER_MS = 7 * DAY_MS;
 
 function isArchived(task, now = Date.now()) {
-  return task.status === "done" && task.completedAt && now - task.completedAt > ARCHIVE_AFTER_MS;
+  const ts = terminalAt(task);
+  return !!ts && now - ts > ARCHIVE_AFTER_MS;
 }
 
-function archivedCount(now = Date.now()) {
-  return data.tasks.filter((t) => isArchived(t, now)).length;
+function archivedCount(status, now = Date.now()) {
+  return data.tasks.filter((t) => t.status === status && isArchived(t, now)).length;
 }
 
 function renderBoard() {
@@ -553,7 +577,7 @@ function renderBoard() {
     const container = document.querySelector(`.cards[data-status="${status}"]`);
     let items = data.tasks.filter((t) => t.status === status);
     let archived = 0;
-    if (status === "done") {
+    if (TERMINAL.includes(status)) {
       const visible = items.filter((t) => !isArchived(t, now));
       archived = items.length - visible.length;
       items = visible;
@@ -568,7 +592,8 @@ function renderBoard() {
       note.textContent =
         status === "backlog" ? "Nothing queued — add a task above."
         : status === "progress" ? "Nothing in progress."
-        : "Nothing done yet.";
+        : status === "done" ? "Nothing done yet."
+        : "Nothing missed — clean sheet.";
       container.appendChild(note);
       continue;
     }
@@ -637,6 +662,10 @@ function buildCard(task, now) {
     when.className = "card-duration";
     when.textContent = `✓ ${formatDuration(task.completedAt - task.createdAt)}`;
     when.title = `Created ${formatDate(task.createdAt)}, done ${formatDate(task.completedAt)}`;
+  } else if (task.status === "missed" && task.missedAt) {
+    when.className = "card-missed";
+    when.textContent = `⊘ Missed ${formatDate(task.missedAt)}`;
+    when.title = `Created ${formatDate(task.createdAt)}, marked not done ${formatDate(task.missedAt)}`;
   } else {
     when.textContent = `Added ${formatDate(task.createdAt)}`;
   }
@@ -644,15 +673,28 @@ function buildCard(task, now) {
   const actions = document.createElement("div");
   actions.className = "card-actions";
 
-  const idx = STATUSES.indexOf(task.status);
-  const back = actionButton("◀", "Move left", idx === 0, () => setStatus(task.id, STATUSES[idx - 1]));
-  const fwd = actionButton("▶", "Move right", idx === STATUSES.length - 1, () => setStatus(task.id, STATUSES[idx + 1]));
   const edit = actionButton("✎", "Edit task", false, () => openEdit(task.id));
   const del = actionButton("✕", "Delete task", false, () => {
     if (confirm(`Delete "${task.title}"?`)) removeTask(task.id);
   });
   del.classList.add("delete-btn");
-  actions.append(back, fwd, edit, del);
+
+  if (task.status === "missed") {
+    // Terminal, off to one side of the flow — offer a way back instead of arrows
+    const restore = actionButton("↩", "Move back to backlog", false, () => setStatus(task.id, "backlog"));
+    actions.append(restore, edit, del);
+  } else {
+    const idx = FLOW.indexOf(task.status);
+    const back = actionButton("◀", "Move left", idx === 0, () => setStatus(task.id, FLOW[idx - 1]));
+    const fwd = actionButton("▶", "Move right", idx === FLOW.length - 1, () => setStatus(task.id, FLOW[idx + 1]));
+    actions.append(back, fwd);
+    if (task.status !== "done") {
+      const miss = actionButton("⊘", "Mark not done", false, () => setStatus(task.id, "missed"));
+      miss.classList.add("miss-btn");
+      actions.append(miss);
+    }
+    actions.append(edit, del);
+  }
 
   meta.append(when, actions);
   card.appendChild(meta);
@@ -1130,11 +1172,11 @@ function average(nums) {
 
 function renderStats() {
   const done = completedTasks();
-  const open = data.tasks.length - done.length;
+  const open = data.tasks.filter((t) => !isTerminal(t)).length;
 
   document.getElementById("stat-done").textContent = done.length;
   document.getElementById("stat-open").textContent = open;
-  const archived = archivedCount();
+  const archived = archivedCount("done");
   document.getElementById("stat-done-note").textContent =
     archived > 0 ? `incl. ${archived} archived from the board` : "";
 
@@ -1170,9 +1212,153 @@ function renderStats() {
 
   renderChart(done);
   renderCategoryChart(done);
+  renderMissedStats();
   renderRanking("list-slowest", done, (a, b) => b.duration - a.duration);
   renderRanking("list-fastest", done, (a, b) => a.duration - b.duration);
   renderBackupNote();
+}
+
+/* ============================================================
+   Not-done tracking — how often each task gets missed, by week
+   ============================================================ */
+
+const MISSED_WEEKS = 6;
+
+function missedTasks() {
+  return data.tasks.filter((t) => t.status === "missed" && t.missedAt);
+}
+
+function renderMissedStats() {
+  const missed = missedTasks();
+  const thisWeek = weekStart(Date.now());
+  const lastWeek = thisWeek - 7 * DAY_MS;
+
+  // Headline tile: misses this week vs last week (fewer is better)
+  const thisWeekCount = missed.filter((t) => weekStart(t.missedAt) === thisWeek).length;
+  const lastWeekCount = missed.filter((t) => weekStart(t.missedAt) === lastWeek).length;
+  document.getElementById("stat-missed").textContent = thisWeekCount;
+  const deltaEl = document.getElementById("stat-missed-delta");
+  deltaEl.className = "stat-delta";
+  if (missed.length === 0) {
+    deltaEl.textContent = "";
+  } else if (thisWeekCount < lastWeekCount) {
+    deltaEl.classList.add("good");
+    deltaEl.textContent = `▼ ${lastWeekCount - thisWeekCount} fewer than last week`;
+  } else if (thisWeekCount > lastWeekCount) {
+    deltaEl.classList.add("bad");
+    deltaEl.textContent = `▲ ${thisWeekCount - lastWeekCount} more than last week`;
+  } else {
+    deltaEl.textContent = `= same as last week (${lastWeekCount})`;
+  }
+
+  renderMissedTable(missed, thisWeek);
+}
+
+function renderMissedTable(missed, thisWeek) {
+  const host = document.getElementById("missed-table");
+  const note = document.getElementById("missed-empty");
+  host.innerHTML = "";
+
+  const weeks = [];
+  for (let i = MISSED_WEEKS - 1; i >= 0; i--) weeks.push(thisWeek - i * 7 * DAY_MS);
+  const windowStart = weeks[0];
+
+  // One row per task: recurring cards group by their template, one-offs by title
+  const groups = new Map();
+  for (const t of missed) {
+    if (weekStart(t.missedAt) < windowStart) continue;
+    const key = t.recurringId || `title:${t.title}`;
+    if (!groups.has(key)) groups.set(key, { title: t.title, counts: new Map(), total: 0 });
+    const g = groups.get(key);
+    const wk = weekStart(t.missedAt);
+    g.counts.set(wk, (g.counts.get(wk) || 0) + 1);
+    g.total += 1;
+  }
+
+  if (groups.size === 0) {
+    note.hidden = false;
+    note.textContent = missed.length === 0
+      ? "Nothing marked not done yet — this table fills in as you use the ⊘ button."
+      : `No misses in the last ${MISSED_WEEKS} weeks.`;
+    return;
+  }
+  note.hidden = true;
+
+  // Most-missed first; beyond 10 tasks the tail folds into one row
+  const ranked = [...groups.values()].sort((a, b) => b.total - a.total || a.title.localeCompare(b.title));
+  const shown = ranked.slice(0, 10);
+  const rest = ranked.slice(10);
+  if (rest.length) {
+    const other = { title: `Other (${rest.length} tasks)`, counts: new Map(), total: 0 };
+    for (const g of rest) {
+      for (const [wk, n] of g.counts) other.counts.set(wk, (other.counts.get(wk) || 0) + n);
+      other.total += g.total;
+    }
+    shown.push(other);
+  }
+
+  const table = document.createElement("table");
+  table.className = "missed-table";
+
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  headRow.appendChild(cell("th", "Task", "t-name"));
+  weeks.forEach((wk, i) => {
+    const th = cell("th", i === weeks.length - 1 ? "This wk" : formatDate(wk), "num");
+    th.title = `Week of ${formatDate(wk)}`;
+    if (i === weeks.length - 1) th.classList.add("is-current");
+    headRow.appendChild(th);
+  });
+  headRow.appendChild(cell("th", "Total", "num total-col"));
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  for (const g of shown) {
+    const tr = document.createElement("tr");
+    const name = cell("th", g.title, "t-name");
+    name.title = g.title;
+    tr.appendChild(name);
+    weeks.forEach((wk, i) => {
+      const n = g.counts.get(wk) || 0;
+      const td = cell("td", n === 0 ? "·" : String(n), "num");
+      if (n === 0) td.classList.add("zero");
+      if (i === weeks.length - 1) td.classList.add("is-current");
+      tr.appendChild(td);
+    });
+    tr.appendChild(cell("td", String(g.total), "num total-col"));
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+
+  const tfoot = document.createElement("tfoot");
+  const footRow = document.createElement("tr");
+  footRow.appendChild(cell("th", "All tasks", "t-name"));
+  let grand = 0;
+  weeks.forEach((wk, i) => {
+    const n = shown.reduce((sum, g) => sum + (g.counts.get(wk) || 0), 0);
+    grand += n;
+    const td = cell("td", n === 0 ? "·" : String(n), "num");
+    if (n === 0) td.classList.add("zero");
+    if (i === weeks.length - 1) td.classList.add("is-current");
+    footRow.appendChild(td);
+  });
+  footRow.appendChild(cell("td", String(grand), "num total-col"));
+  tfoot.appendChild(footRow);
+  table.appendChild(tfoot);
+
+  const scroller = document.createElement("div");
+  scroller.className = "table-scroll";
+  scroller.appendChild(table);
+  host.appendChild(scroller);
+}
+
+function cell(tag, text, className) {
+  const node = document.createElement(tag);
+  node.textContent = text;
+  if (className) node.className = className;
+  if (tag === "th" && className && className.includes("t-name")) node.scope = "row";
+  return node;
 }
 
 function renderRanking(elementId, done, comparator) {

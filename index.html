@@ -89,6 +89,12 @@
           </div>
           <div class="cards" data-status="done"></div>
         </div>
+        <div class="column" data-status="missed">
+          <div class="column-header">
+            <h2>Not Done</h2><span class="count" data-count="missed">0</span>
+          </div>
+          <div class="cards" data-status="missed"></div>
+        </div>
       </div>
 
       <section id="recurring-panel" class="recurring-panel" hidden>
@@ -114,6 +120,11 @@
           <span class="stat-label">Open tasks</span>
           <span class="stat-value" id="stat-open">0</span>
         </div>
+        <div class="stat-tile">
+          <span class="stat-label">Missed this week</span>
+          <span class="stat-value" id="stat-missed">0</span>
+          <span class="stat-delta" id="stat-missed-delta"></span>
+        </div>
       </div>
 
       <div class="chart-card viz-root">
@@ -129,6 +140,13 @@
         <div id="cat-legend" class="cat-legend"></div>
         <div id="cat-chart" class="chart"></div>
         <p id="cat-chart-empty" class="empty-note" hidden>Finish a few tasks and the category breakdown will show up here.</p>
+      </div>
+
+      <div class="list-card">
+        <h2 class="chart-title">Not done, week over week</h2>
+        <p class="chart-subtitle">How many times each task was marked not done, by week</p>
+        <div id="missed-table"></div>
+        <p id="missed-empty" class="empty-note" hidden></p>
       </div>
 
       <div class="lists-row">
