@@ -392,6 +392,117 @@ main {
 .badge.due-critical .dot { background: var(--status-critical); }
 .badge.due-critical { color: var(--status-critical); border-color: var(--status-critical); }
 
+/* ---------- Subtasks on a card ---------- */
+.subtask-badge {
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.subtask-badge.due-critical { color: var(--status-critical); border-color: var(--status-critical); }
+.subtask-badge:hover { border-color: var(--series-1); color: var(--series-1); }
+
+.subtasks {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--gridline);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.subtasks li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.subtasks label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.subtasks input[type="checkbox"] {
+  accent-color: var(--series-1);
+  flex: none;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.subtasks .sub-title { overflow-wrap: anywhere; }
+
+.subtasks li.is-done .sub-title {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.sub-due {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sub-due.due-good { color: var(--status-good); }
+.sub-due.due-warning { color: var(--text-secondary); }
+.sub-due.due-serious { color: var(--status-serious); }
+.sub-due.due-critical { color: var(--status-critical); }
+
+/* ---------- Subtask editor (dialog) ---------- */
+.subtask-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.subtask-editor:empty { display: none; }
+
+.subtask-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.subtask-row .sub-title-input { flex: 1; min-width: 0; }
+
+.subtask-row .sub-due-input {
+  flex: none;
+  width: 9.5rem;
+  font-size: 13px;
+}
+
+.subtask-row .sub-remove {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.subtask-row .sub-remove:hover { background: var(--gridline); color: var(--danger); }
+
+.add-subtask-btn {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
 .card-meta {
   display: flex;
   align-items: center;

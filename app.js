@@ -94,6 +94,19 @@ function freqLabel(template) {
    auto-recovery, export/import
    ============================================================ */
 
+/* A subtask is a checklist step of its parent card: its own title and
+   optional deadline, ticked off in place rather than moved between columns */
+function sanitizeSubtask(s) {
+  if (!s || typeof s !== "object") return null;
+  if (typeof s.title !== "string" || !s.title.trim()) return null;
+  return {
+    id: typeof s.id === "string" ? s.id : makeId(),
+    title: s.title.trim().slice(0, 200),
+    dueAt: Number.isFinite(s.dueAt) ? s.dueAt : null,
+    doneAt: Number.isFinite(s.doneAt) ? s.doneAt : null,
+  };
+}
+
 function sanitizeTask(t) {
   if (!t || typeof t !== "object") return null;
   if (typeof t.id !== "string" || typeof t.title !== "string" || !t.title.trim()) return null;
@@ -108,6 +121,9 @@ function sanitizeTask(t) {
     recurringId: typeof t.recurringId === "string" ? t.recurringId : null,
     notifiedLevel: ["serious", "critical"].includes(t.notifiedLevel) ? t.notifiedLevel : null,
     category: typeof t.category === "string" && t.category.trim() ? t.category.trim().slice(0, 40) : null,
+    subtasks: Array.isArray(t.subtasks)
+      ? t.subtasks.map(sanitizeSubtask).filter(Boolean).slice(0, 50)
+      : [],
   };
 }
 
@@ -325,6 +341,7 @@ function addTask(title, { dueAt = null, recurringId = null, category = null } = 
     dueAt,
     recurringId,
     category: ensureCategory(category),
+    subtasks: [],
   };
   data.tasks.unshift(task);
   save();
@@ -360,8 +377,8 @@ function boardComparator(status) {
     return (a, b) => (terminalAt(b) || 0) - (terminalAt(a) || 0);
   }
   return (a, b) => {
-    const ad = a.dueAt || Infinity;
-    const bd = b.dueAt || Infinity;
+    const ad = effectiveDue(a);
+    const bd = effectiveDue(b);
     if (ad !== bd) return ad - bd;
     return b.createdAt - a.createdAt;
   };
@@ -466,6 +483,7 @@ function runRecurrence() {
       dueAt: template.freq === "days" ? endOfDay(now) : next,
       recurringId: template.id,
       category: template.category || null,
+      subtasks: [],
     });
   }
   if (changed) {
@@ -514,27 +532,83 @@ function renderRecurringPanel() {
    Deadlines — urgency from green to red
    ============================================================ */
 
-function urgencyOf(task, now = Date.now()) {
-  if (!task.dueAt || isTerminal(task)) return null;
-  const remaining = task.dueAt - now;
+const URGENCY_RANK = { good: 1, warning: 2, serious: 3, critical: 4 };
+
+function urgencyFor(dueAt, startAt, now) {
+  if (!dueAt) return null;
+  const remaining = dueAt - now;
   if (remaining <= 0) return "critical";
-  const total = Math.max(task.dueAt - task.createdAt, HOUR_MS);
+  const total = Math.max(dueAt - startAt, HOUR_MS);
   const frac = remaining / total;
   if (frac < 0.2 || remaining < 24 * HOUR_MS) return "serious";
   if (frac < 0.5) return "warning";
   return "good";
 }
 
-function dueLabel(task, now = Date.now()) {
-  const remaining = task.dueAt - now;
+/* The card's colour reflects the worst deadline in play — its own or any
+   unfinished subtask's — so a slipping step surfaces on the parent card.
+   Returns { level, dueAt, subtask } or null. */
+function urgencyInfo(task, now = Date.now()) {
+  if (isTerminal(task)) return null;
+  let worst = null;
+  const consider = (dueAt, subtask) => {
+    const level = urgencyFor(dueAt, task.createdAt, now);
+    if (!level) return;
+    const better = !worst
+      || URGENCY_RANK[level] > URGENCY_RANK[worst.level]
+      || (URGENCY_RANK[level] === URGENCY_RANK[worst.level] && dueAt < worst.dueAt);
+    if (better) worst = { level, dueAt, subtask };
+  };
+  consider(task.dueAt, null);
+  for (const s of openSubtasks(task)) consider(s.dueAt, s);
+  return worst;
+}
+
+function urgencyOf(task, now = Date.now()) {
+  const info = urgencyInfo(task, now);
+  return info && info.level;
+}
+
+function dueLabel(dueAt, now = Date.now()) {
+  const remaining = dueAt - now;
   if (remaining <= 0) return `Overdue ${formatDuration(-remaining)}`;
   if (remaining < 24 * HOUR_MS) return `Due in ${formatDuration(remaining)}`;
-  const today = new Date(now);
-  const due = new Date(task.dueAt);
-  const tomorrow = new Date(today);
+  const due = new Date(dueAt);
+  const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
   if (due.toDateString() === tomorrow.toDateString()) return "Due tomorrow";
-  return `Due ${formatDate(task.dueAt)}`;
+  return `Due ${formatDate(dueAt)}`;
+}
+
+/* ============================================================
+   Subtasks
+   ============================================================ */
+
+function openSubtasks(task) {
+  return (task.subtasks || []).filter((s) => !s.doneAt);
+}
+
+function subtaskProgress(task) {
+  const all = task.subtasks || [];
+  return { done: all.length - openSubtasks(task).length, total: all.length };
+}
+
+/* Earliest deadline still in play — used to sort the open columns */
+function effectiveDue(task) {
+  let earliest = task.dueAt || Infinity;
+  for (const s of openSubtasks(task)) {
+    if (s.dueAt && s.dueAt < earliest) earliest = s.dueAt;
+  }
+  return earliest;
+}
+
+function toggleSubtask(taskId, subId) {
+  const task = data.tasks.find((t) => t.id === taskId);
+  const sub = task && (task.subtasks || []).find((s) => s.id === subId);
+  if (!sub) return;
+  sub.doneAt = sub.doneAt ? null : Date.now();
+  save();
+  renderAll();
 }
 
 /* ============================================================
@@ -610,14 +684,51 @@ function renderBoard() {
   renderRecurringPanel();
 }
 
+/* Which cards have their checklist open — kept across re-renders */
+const expandedCards = new Set();
+
+function buildSubtaskList(task, now) {
+  const list = document.createElement("ul");
+  list.className = "subtasks";
+
+  for (const sub of task.subtasks) {
+    const li = document.createElement("li");
+    if (sub.doneAt) li.classList.add("is-done");
+
+    const label = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = !!sub.doneAt;
+    box.addEventListener("change", () => toggleSubtask(task.id, sub.id));
+    const text = document.createElement("span");
+    text.className = "sub-title";
+    text.textContent = sub.title;
+    label.append(box, text);
+    li.appendChild(label);
+
+    if (sub.dueAt) {
+      const live = !sub.doneAt && !isTerminal(task);
+      const level = live ? urgencyFor(sub.dueAt, task.createdAt, now) : null;
+      const chip = document.createElement("span");
+      chip.className = "sub-due" + (level ? ` due-${level}` : "");
+      chip.textContent = live ? dueLabel(sub.dueAt, now) : formatDate(sub.dueAt);
+      chip.title = `Step due ${formatDate(sub.dueAt)}`;
+      li.appendChild(chip);
+    }
+
+    list.appendChild(li);
+  }
+  return list;
+}
+
 function buildCard(task, now) {
   const card = document.createElement("article");
   card.className = "card";
   card.draggable = true;
   card.dataset.id = task.id;
 
-  const urgency = urgencyOf(task, now);
-  if (urgency) card.classList.add(`due-${urgency}`);
+  const info = urgencyInfo(task, now);
+  if (info) card.classList.add(`due-${info.level}`);
 
   const title = document.createElement("div");
   title.className = "card-title";
@@ -625,13 +736,39 @@ function buildCard(task, now) {
   card.appendChild(title);
 
   const badges = document.createElement("div");
-  if (urgency) {
+  // The task's own deadline keeps its own badge; subtask deadlines are
+  // shown per step in the checklist below
+  const ownLevel = isTerminal(task) ? null : urgencyFor(task.dueAt, task.createdAt, now);
+  if (ownLevel) {
     const badge = document.createElement("span");
-    badge.className = `badge due-${urgency}`;
+    badge.className = `badge due-${ownLevel}`;
     const dot = document.createElement("span");
     dot.className = "dot";
-    badge.append(dot, document.createTextNode(dueLabel(task, now)));
+    badge.append(dot, document.createTextNode(dueLabel(task.dueAt, now)));
     badges.appendChild(badge);
+  }
+  const progress = subtaskProgress(task);
+  if (progress.total > 0) {
+    // A finished card doesn't nag about steps it never got to
+    const overdue = isTerminal(task)
+      ? 0
+      : openSubtasks(task).filter((s) => s.dueAt && s.dueAt <= now).length;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "badge subtask-badge";
+    if (overdue > 0) btn.classList.add("due-critical");
+    const expanded = expandedCards.has(task.id);
+    btn.textContent = `${expanded ? "▾" : "▸"} ☑ ${progress.done}/${progress.total}`
+      + (overdue > 0 ? ` · ${overdue} overdue` : "");
+    btn.setAttribute("aria-expanded", String(expanded));
+    btn.title = expanded ? "Hide steps" : "Show steps";
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (expandedCards.has(task.id)) expandedCards.delete(task.id);
+      else expandedCards.add(task.id);
+      renderBoard();
+    });
+    badges.appendChild(btn);
   }
   if (task.recurringId) {
     const template = data.recurring.find((r) => r.id === task.recurringId);
@@ -652,6 +789,10 @@ function buildCard(task, now) {
   if (badges.childNodes.length) {
     badges.className = "badges";
     card.appendChild(badges);
+  }
+
+  if (subtaskProgress(task).total > 0 && expandedCards.has(task.id)) {
+    card.appendChild(buildSubtaskList(task, now));
   }
 
   const meta = document.createElement("div");
@@ -855,6 +996,64 @@ editRecur.addEventListener("change", () => {
 let editingId = null;
 let editingOriginalDue = "";
 
+/* ---------- Subtask editor rows ---------- */
+
+const subtaskEditor = document.getElementById("edit-subtasks");
+
+function addSubtaskRow(sub = null) {
+  const row = document.createElement("div");
+  row.className = "subtask-row";
+  if (sub) {
+    row.dataset.id = sub.id;
+    if (sub.doneAt) row.dataset.doneAt = String(sub.doneAt);
+  }
+
+  const title = document.createElement("input");
+  title.type = "text";
+  title.className = "sub-title-input";
+  title.maxLength = 200;
+  title.placeholder = "Step";
+  title.value = sub ? sub.title : "";
+
+  const due = document.createElement("input");
+  due.type = "date";
+  due.className = "sub-due-input";
+  due.setAttribute("aria-label", "Subtask deadline");
+  due.value = sub ? dueAtToDateInput(sub.dueAt) : "";
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "sub-remove";
+  remove.textContent = "✕";
+  remove.title = "Remove subtask";
+  remove.setAttribute("aria-label", "Remove subtask");
+  remove.addEventListener("click", () => row.remove());
+
+  row.append(title, due, remove);
+  subtaskEditor.appendChild(row);
+  return title;
+}
+
+document.getElementById("edit-add-subtask").addEventListener("click", () => {
+  addSubtaskRow().focus();
+});
+
+/* Reads the rows back, keeping the done state and id of existing steps */
+function readSubtaskRows() {
+  const out = [];
+  for (const row of subtaskEditor.querySelectorAll(".subtask-row")) {
+    const title = row.querySelector(".sub-title-input").value.trim();
+    if (!title) continue; // a blank row is just an abandoned draft
+    out.push({
+      id: row.dataset.id || makeId(),
+      title: title.slice(0, 200),
+      dueAt: dateInputToDueAt(row.querySelector(".sub-due-input").value),
+      doneAt: row.dataset.doneAt ? Number(row.dataset.doneAt) : null,
+    });
+  }
+  return out.slice(0, 50);
+}
+
 function openEdit(id) {
   const task = data.tasks.find((t) => t.id === id);
   if (!task) return;
@@ -863,6 +1062,9 @@ function openEdit(id) {
   editingOriginalDue = dueAtToDateInput(task.dueAt);
   editDue.value = editingOriginalDue;
   editCategory.value = task.category || "";
+
+  subtaskEditor.innerHTML = "";
+  for (const sub of task.subtasks || []) addSubtaskRow(sub);
 
   const template = task.recurringId
     ? data.recurring.find((r) => r.id === task.recurringId)
@@ -899,6 +1101,9 @@ editForm.addEventListener("submit", (e) => {
 
   task.title = title;
   task.category = ensureCategory(editCategory.value) || null;
+  task.subtasks = readSubtaskRows();
+  // A card whose steps were all removed shouldn't stay expanded
+  if (task.subtasks.length === 0) expandedCards.delete(task.id);
 
   // Only touch the deadline if the date field actually changed,
   // so an untouched field keeps the exact original due time
@@ -1090,12 +1295,15 @@ function checkDeadlineNotifications() {
   const now = Date.now();
   let changed = false;
   for (const task of data.tasks) {
-    const level = urgencyOf(task, now);
+    const info = urgencyInfo(task, now);
+    const level = info && info.level;
     if (!NOTIFY_RANK[level]) continue;
     if ((NOTIFY_RANK[task.notifiedLevel] || 0) >= NOTIFY_RANK[level]) continue;
+    // A subtask deadline pings under the parent's name, naming the step
+    const what = info.subtask ? `${info.subtask.title} — ` : "";
     const body = level === "critical"
-      ? `Overdue: ${dueLabel(task, now).replace("Overdue ", "past deadline by ")}`
-      : dueLabel(task, now);
+      ? `${what}Overdue: ${dueLabel(info.dueAt, now).replace("Overdue ", "past deadline by ")}`
+      : `${what}${dueLabel(info.dueAt, now)}`;
     try {
       const n = new Notification(level === "critical" ? `🔴 ${task.title}` : `⏰ ${task.title}`, {
         body,

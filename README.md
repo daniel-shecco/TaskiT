@@ -17,8 +17,17 @@ browser's `localStorage`.
   occurrence exactly like completing it does, so tomorrow's card still shows
   up. The ↩ button puts a card back in the backlog if you change your mind.
 - **Edit in place** — the ✎ button (or double-click) opens an edit dialog to
-  rename a task, change or clear its due date, and add, change, or remove its
-  recurrence — including turning an existing task into a recurring one.
+  rename a task, change or clear its due date, manage its subtasks, and add,
+  change, or remove its recurrence — including turning an existing task into
+  a recurring one.
+- **Subtasks with their own deadlines** — break a task into steps in the edit
+  dialog, each with an optional deadline of its own. The card shows a
+  `☑ 2/5` badge (plus `· N overdue` when a step has slipped); click it to
+  open the checklist and tick steps off in place. A step's deadline colours
+  the parent card and feeds the urgency sorting and notifications, so a
+  slipping step surfaces on the board even when the task itself has no
+  deadline. Subtasks belong to the individual card — a recurring task's new
+  cards start with a clean slate.
 - **Creation & completion dates** — every task records when it was created;
   moving a card to *Done* stamps its completion time. Done cards show how long
   they took (✓ 3.2 d, ✓ 45 min, …).
