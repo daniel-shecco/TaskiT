@@ -43,6 +43,8 @@ browser's `localStorage`.
 - **Stats view** — see how your pace changes over time:
   - Average time-to-done, with a trend vs. the previous 4 weeks.
   - A weekly chart of average completion time (hover a bar for details).
+  - A weekly chart of **how many** tasks you completed, with the
+    week-over-week change in each bar's tooltip.
   - A weekly chart of tasks completed **by category**, one bar per category,
     with legend and per-week tooltips.
   - **Not done, week over week** — a table of how many times each task was

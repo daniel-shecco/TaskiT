@@ -1419,6 +1419,7 @@ function renderStats() {
   }
 
   renderChart(done);
+  renderCountChart(done);
   renderCategoryChart(done);
   renderMissedStats();
   renderRanking("list-slowest", done, (a, b) => b.duration - a.duration);
@@ -1626,11 +1627,12 @@ function weeklyBuckets(done) {
   return buckets;
 }
 
-function renderChart(done) {
-  const host = document.getElementById("chart");
-  const emptyNote = document.getElementById("chart-empty");
+/* One weekly bar per bucket. The avg-time and task-count charts differ
+   only in the value they plot, the axis labels and the tooltip. */
+function renderWeeklyBars({ hostId, emptyId, buckets, value, yMax, tickLabel, ariaLabel, tooltip }) {
+  const host = document.getElementById(hostId);
+  const emptyNote = document.getElementById(emptyId);
   host.innerHTML = "";
-  const buckets = weeklyBuckets(done);
   const hasData = buckets.some((b) => b.count > 0);
   emptyNote.hidden = hasData;
   if (!hasData) return;
@@ -1640,8 +1642,6 @@ function renderChart(done) {
   const plotW = W - pad.left - pad.right;
   const plotH = H - pad.top - pad.bottom;
 
-  const maxVal = Math.max(...buckets.map((b) => b.avgDays || 0), 0.1);
-  const yMax = niceCeil(maxVal);
   const barSlot = plotW / buckets.length;
   const barW = Math.min(48, Math.max(10, barSlot - 8));
 
@@ -1656,14 +1656,14 @@ function renderChart(done) {
   const svg = el("svg", {
     viewBox: `0 0 ${W} ${H}`,
     role: "img",
-    "aria-label": "Bar chart of average days to complete tasks, per week",
+    "aria-label": ariaLabel,
   });
 
   // Horizontal gridlines + y tick labels
   const ticks = 4;
   for (let i = 0; i <= ticks; i++) {
-    const value = (yMax / ticks) * i;
-    const y = pad.top + plotH - (value / yMax) * plotH;
+    const tickValue = (yMax / ticks) * i;
+    const y = pad.top + plotH - (tickValue / yMax) * plotH;
     if (i > 0) {
       svg.appendChild(el("line", {
         x1: pad.left, x2: W - pad.right, y1: y, y2: y,
@@ -1673,7 +1673,7 @@ function renderChart(done) {
     svg.appendChild(el("text", {
       x: pad.left - 8, y: y + 4, "text-anchor": "end",
       "font-size": 11, fill: ink.muted,
-    }, formatTick(value)));
+    }, tickLabel(tickValue)));
   }
 
   // Baseline
@@ -1698,7 +1698,7 @@ function renderChart(done) {
 
     if (b.count === 0) return;
 
-    const h = Math.max(2, (b.avgDays / yMax) * plotH);
+    const h = Math.max(2, (value(b) / yMax) * plotH);
     const x = cx - barW / 2;
     const y = pad.top + plotH - h;
     const r = Math.min(4, h, barW / 2);
@@ -1716,15 +1716,50 @@ function renderChart(done) {
       width: barSlot, height: plotH,
       fill: "transparent",
     });
-    attachTooltip(hit, () =>
-      `<div class="tt-title">Week of ${formatDate(b.week)}</div>` +
-      `<div>Avg: ${formatDuration(b.avgDays * DAY_MS)}</div>` +
-      `<div class="tt-sub">${b.count} task${b.count === 1 ? "" : "s"} completed</div>`
-    );
+    attachTooltip(hit, () => tooltip(b));
     svg.appendChild(hit);
   });
 
   host.appendChild(svg);
+}
+
+function renderChart(done) {
+  const buckets = weeklyBuckets(done);
+  renderWeeklyBars({
+    hostId: "chart",
+    emptyId: "chart-empty",
+    buckets,
+    value: (b) => b.avgDays,
+    yMax: niceCeil(Math.max(...buckets.map((b) => b.avgDays || 0), 0.1)),
+    tickLabel: formatTick,
+    ariaLabel: "Bar chart of average days to complete tasks, per week",
+    tooltip: (b) =>
+      `<div class="tt-title">Week of ${formatDate(b.week)}</div>` +
+      `<div>Avg: ${formatDuration(b.avgDays * DAY_MS)}</div>` +
+      `<div class="tt-sub">${b.count} task${b.count === 1 ? "" : "s"} completed</div>`,
+  });
+}
+
+function renderCountChart(done) {
+  const buckets = weeklyBuckets(done);
+  renderWeeklyBars({
+    hostId: "count-chart",
+    emptyId: "count-chart-empty",
+    buckets,
+    value: (b) => b.count,
+    yMax: countCeil(Math.max(...buckets.map((b) => b.count), 1)),
+    tickLabel: (v) => String(Math.round(v)),
+    ariaLabel: "Bar chart of the number of tasks completed, per week",
+    tooltip: (b) => {
+      const prev = buckets[buckets.indexOf(b) - 1];
+      const delta = prev ? b.count - prev.count : null;
+      const trend = delta === null || delta === 0
+        ? ""
+        : `<div class="tt-sub">${delta > 0 ? "▲" : "▼"} ${Math.abs(delta)} vs the week before</div>`;
+      return `<div class="tt-title">Week of ${formatDate(b.week)}</div>` +
+        `<div>${b.count} task${b.count === 1 ? "" : "s"} completed</div>` + trend;
+    },
+  });
 }
 
 /* ============================================================
@@ -1793,7 +1828,7 @@ function renderCategoryChart(done) {
     const m = byWeek.get(b.week);
     return m.size ? Math.max(...m.values()) : 0;
   }), 1);
-  const yMax = [4, 8, 12, 16, 24, 40, 80, 160].find((s) => maxSingle <= s) || Math.ceil(maxSingle / 40) * 40;
+  const yMax = countCeil(maxSingle);
   const barSlot = plotW / buckets.length;
   const barW = Math.min(48, Math.max(10, barSlot - 8));
 
@@ -1890,6 +1925,12 @@ function niceCeil(value) {
   const steps = [0.25, 0.5, 1, 2, 4, 8, 12, 16, 24, 48, 96, 180, 360];
   for (const s of steps) if (value <= s) return s;
   return Math.ceil(value / 100) * 100;
+}
+
+/* Same idea for whole-number axes: every tick stays an integer */
+function countCeil(value) {
+  const steps = [4, 8, 12, 16, 24, 40, 80, 160];
+  return steps.find((s) => value <= s) || Math.ceil(value / 40) * 40;
 }
 
 function formatTick(days) {
