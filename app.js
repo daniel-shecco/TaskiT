@@ -258,6 +258,16 @@ function persistLocal() {
   }
 }
 
+/* Another tab of the same browser writing the store: adopt its version
+   instead of overwriting it from our now-stale copy on the next save */
+window.addEventListener("storage", (e) => {
+  if (e.key !== STORAGE_KEY || !e.newValue) return;
+  const incoming = tryParse(e.newValue);
+  if (!incoming || (incoming.updatedAt || 0) <= (data.updatedAt || 0)) return;
+  data = incoming;
+  renderAll(); // the other tab already persisted it
+});
+
 function save() {
   data.updatedAt = Date.now();
   persistLocal();
@@ -466,6 +476,14 @@ function runRecurrence() {
     if (hasOpenInstance(template.id)) {
       if (template.nextAt !== latest) {
         template.nextAt = latest; // still due — spawns once unblocked
+        changed = true;
+      }
+      continue;
+    }
+    // Belt and braces: one card per occurrence, however often this runs
+    if ((template.lastSpawnAt || 0) >= latest) {
+      if (template.nextAt !== next) {
+        template.nextAt = next;
         changed = true;
       }
       continue;
@@ -1185,15 +1203,24 @@ if (!SpeechRec) {
   recognition.continuous = false;
 
   recognition.onstart = () => {
+    consumedFinals = 0; // a new session starts a fresh results list
     listening = true;
     voiceBtn.classList.add("is-listening");
     setVoiceStatus("Listening… say your task");
   };
 
+  /* event.results is cumulative: every event carries the whole session,
+     so a final result is redelivered on each later event. Track how many
+     finals have been turned into tasks and never re-add one. */
+  let consumedFinals = 0;
+
   recognition.onresult = (event) => {
     let interim = "";
-    for (const result of event.results) {
+    for (let i = 0; i < event.results.length; i++) {
+      const result = event.results[i];
       if (result.isFinal) {
+        if (i < consumedFinals) continue; // already added on an earlier event
+        consumedFinals = i + 1;
         const transcript = result[0].transcript.trim();
         if (transcript) {
           addTask(transcript, { dueAt: pickedDueAt(), category: catInput.value.trim() || null });
