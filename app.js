@@ -180,6 +180,8 @@ function sanitizeData(raw) {
     recurring,
     categories,
     updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : 0,
+    lastExportAt: Number.isFinite(raw.lastExportAt) ? raw.lastExportAt : null,
+    backupReminderAt: Number.isFinite(raw.backupReminderAt) ? raw.backupReminderAt : null,
   };
 }
 
@@ -213,7 +215,8 @@ function loadData() {
     const parsed = tryParse(`{"tasks": ${legacy}}`);
     if (parsed) return parsed;
   }
-  return { version: SCHEMA_VERSION, tasks: [], recurring: [], categories: [], updatedAt: 0 };
+  return { version: SCHEMA_VERSION, tasks: [], recurring: [], categories: [],
+           updatedAt: 0, lastExportAt: null, backupReminderAt: null };
 }
 
 /* A board with no tasks and no recurrences — never allowed to overwrite
@@ -285,7 +288,54 @@ function save() {
 
 /* ---------- Export / import ---------- */
 
-document.getElementById("export-btn").addEventListener("click", () => {
+/* ---------- Backup reminder ---------- */
+
+const BACKUP_EVERY_MS = 15 * DAY_MS;
+const SNOOZE_MS = 3 * DAY_MS;
+
+function backupDue(now = Date.now()) {
+  return !isEmptyBoard(data) && data.backupReminderAt && now >= data.backupReminderAt;
+}
+
+/* Called after an export, and once when a board first has something in it */
+function scheduleBackupReminder(from = Date.now(), gap = BACKUP_EVERY_MS) {
+  data.backupReminderAt = from + gap;
+}
+
+function renderBackupBanner() {
+  const host = document.getElementById("backup-banner");
+  if (!host) return;
+  host.innerHTML = "";
+  host.hidden = !backupDue();
+  if (host.hidden) return;
+
+  const text = document.createElement("span");
+  const since = data.lastExportAt
+    ? `Last export: ${formatDate(data.lastExportAt)}.`
+    : "You haven't exported a copy yet.";
+  text.textContent = `Time to back up — ${since} A file on your computer is the one copy nothing here can erase.`;
+
+  const now = document.createElement("button");
+  now.type = "button";
+  now.className = "secondary-btn";
+  now.textContent = "Export now";
+  now.addEventListener("click", exportBoard);
+
+  const later = document.createElement("button");
+  later.type = "button";
+  later.className = "secondary-btn";
+  later.textContent = "Later";
+  later.addEventListener("click", () => {
+    scheduleBackupReminder(Date.now(), SNOOZE_MS);
+    save();
+    renderAll();
+    showToast("Reminder snoozed for 3 days");
+  });
+
+  host.append(text, now, later);
+}
+
+function exportBoard() {
   const payload = { app: "TaskiT", exportedAt: new Date().toISOString(), ...data };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -294,7 +344,14 @@ document.getElementById("export-btn").addEventListener("click", () => {
   a.download = `taskit-backup-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
-});
+  data.lastExportAt = Date.now();
+  scheduleBackupReminder();
+  save();
+  renderAll();
+  showToast("Backed up — next reminder in 15 days");
+}
+
+document.getElementById("export-btn").addEventListener("click", exportBoard);
 
 const importFile = document.getElementById("import-file");
 document.getElementById("import-btn").addEventListener("click", () => importFile.click());
@@ -353,9 +410,14 @@ function renderBackupNote() {
   const meta = backupMeta();
   const note = document.getElementById("backup-note");
   const when = meta.lastAt ? ` Last auto-backup: ${formatDate(meta.lastAt)}.` : "";
+  const exported = data.lastExportAt ? ` Last export: ${formatDate(data.lastExportAt)}.` : "";
+  const next = data.backupReminderAt
+    ? ` Next reminder: ${backupDue() ? "now" : formatDate(data.backupReminderAt)}.`
+    : "";
   note.textContent =
     "Tasks are saved in this browser and auto-backed up daily (last 3 days kept)." +
-    when + " Export a JSON file now and then to keep a copy outside the browser.";
+    when + exported +
+    " Export a JSON file every couple of weeks to keep a copy outside the browser." + next;
 }
 
 /* ============================================================
@@ -2428,6 +2490,7 @@ function renderAll() {
   renderBoard();
   renderCategoryDatalist();
   renderRecoveryBanner();
+  renderBackupBanner();
   if (!viewStats.hidden) renderStats();
 }
 
@@ -2474,6 +2537,8 @@ export const bridge = {
 };
 
 runRecurrence();
+// Start the backup clock once there is something worth backing up
+if (!data.backupReminderAt && !isEmptyBoard(data)) scheduleBackupReminder();
 renderAll();
 // Persist any v1 migration and take the daily backup — but WITHOUT
 // bumping updatedAt. Stamping "now" here made a stale or wiped local

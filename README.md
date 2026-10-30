@@ -76,6 +76,13 @@ browser's `localStorage`.
   (see [SETUP-SYNC.md](SETUP-SYNC.md)) and sign in with Google to sync your
   board between phone and laptop in real time, with offline support. Without
   it, TaskiT stays fully local.
+- **Backup reminder** — every 15 days the board shows a nudge to export a
+  copy, with *Export now* or *Later* (3 days). Exporting resets the clock,
+  and the Stats panel always says when the next reminder lands.
+- **Recovery** — if the board is ever empty while a backup isn't, a banner
+  offers to restore it. Stats lists every copy still in the browser with
+  Merge or Restore, accepts a board pasted as text, and can scan raw Chrome
+  storage files for boards left inside them.
 - **Robust data** — versioned storage with validation, automatic daily
   rolling backups (last 3 days kept), automatic recovery from backup if the
   main store is ever corrupted, and **Export / Import JSON** (Stats tab) for

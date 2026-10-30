@@ -431,6 +431,13 @@ main {
   resize: vertical;
 }
 
+/* a routine nudge, not an alarm — beaten by .recovery-banner on order
+   alone, so match both classes */
+.recovery-banner.backup-banner {
+  border-color: var(--series-1);
+  border-left-color: var(--series-1);
+}
+
 #persist-note.warn { color: var(--status-serious); }
 
 /* ---------- Recovery ---------- */
