@@ -182,6 +182,13 @@
         <h3 class="recovery-title">Recover an earlier copy</h3>
         <p class="chart-subtitle">Copies of your board still stored in this browser. Merge keeps everything from both; Restore replaces what's on the board now.</p>
         <div id="recovery-list"></div>
+        <h3 class="recovery-title">Scan browser storage files</h3>
+        <p class="chart-subtitle">Last resort: pick the files from a Chrome <code>Local Storage\leveldb</code> folder and TaskiT will look for boards still left inside them. Everything stays on this device.</p>
+        <div class="data-actions">
+          <button type="button" id="scan-btn" class="secondary-btn">Choose files to scan…</button>
+          <input type="file" id="scan-files" multiple hidden />
+        </div>
+        <div id="scan-results"></div>
       </div>
     </section>
   </main>

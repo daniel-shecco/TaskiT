@@ -1178,6 +1178,185 @@ addForm.addEventListener("submit", (e) => {
   taskInput.focus();
 });
 
+/* ============================================================
+   Salvage — boards left inside raw browser storage files
+
+   Chrome keeps localStorage in LevelDB, which does not erase an
+   overwritten value straight away: the old JSON often survives in the
+   .log and .ldb files until the database is compacted. These helpers
+   read such a file and pull any board-shaped JSON back out of it.
+   ============================================================ */
+
+const SALVAGE_MARKERS = ['{"version":', '{"tasks":', '{"app":"TaskiT"', '[{"id":'];
+
+/* Walks a balanced JSON value from `start`, respecting strings and
+   escapes, and returns it — or null if it never closes. */
+function extractJsonAt(text, start) {
+  const open = text[start];
+  const close = open === "{" ? "}" : "]";
+  let depth = 0, inString = false, escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === open) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/* A bare array is only a list of tasks if it looks like one — the
+   recurring templates are also objects with an id and a title */
+function looksLikeTaskArray(value) {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.every((t) => t && typeof t === "object" && !("freq" in t) && !("nextAt" in t))
+    && value.some((t) => "status" in t || "createdAt" in t);
+}
+
+function boardFromJsonText(text) {
+  const direct = tryParse(text);
+  if (direct) return direct;
+  let parsed = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  return looksLikeTaskArray(parsed) ? tryParse(`{"tasks": ${text}}`) : null;
+}
+
+/* Every board that can be parsed out of one decoded text view */
+function salvageFromText(text) {
+  const found = [];
+  for (const marker of SALVAGE_MARKERS) {
+    let from = 0;
+    for (;;) {
+      const at = text.indexOf(marker, from);
+      if (at === -1) break;
+      from = at + 1;
+      const candidate = extractJsonAt(text, at);
+      if (!candidate || candidate.length < 40) continue;
+      const board = boardFromJsonText(candidate);
+      if (board && !isEmptyBoard(board)) found.push(board);
+    }
+  }
+  return found;
+}
+
+/* The same bytes decoded both ways: localStorage stores a value as
+   UTF-16 or as single bytes depending on its contents */
+function salvageFromBuffer(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const views = [
+    new TextDecoder("utf-8", { fatal: false }).decode(bytes),
+    new TextDecoder("utf-16le", { fatal: false }).decode(bytes),
+    // a UTF-16 value can start on an odd byte once a key precedes it
+    new TextDecoder("utf-16le", { fatal: false }).decode(bytes.subarray(1)),
+  ];
+  return views.flatMap(salvageFromText);
+}
+
+function dedupeBoards(boards) {
+  const byShape = new Map();
+  for (const board of boards) {
+    const key = board.tasks.map((t) => t.id).sort().join("|");
+    const existing = byShape.get(key);
+    if (!existing || (board.updatedAt || 0) > (existing.updatedAt || 0)) byShape.set(key, board);
+  }
+  const ranked = [...byShape.values()].sort((a, b) => b.tasks.length - a.tasks.length);
+
+  // Drop a copy whose every task appears unchanged in a fuller copy: it is
+  // a truncated fragment or an identical older write, and offering it only
+  // adds noise. A copy holding a genuinely different state is kept.
+  const fingerprint = (t) => JSON.stringify(t);
+  return ranked.filter((board, i) =>
+    !ranked.some((other, j) => {
+      if (j >= i) return false; // only compare against fuller copies
+      const theirs = new Set(other.tasks.map(fingerprint));
+      return board.tasks.every((t) => theirs.has(fingerprint(t)));
+    })
+  );
+}
+
+async function scanFilesForBoards(files) {
+  const boards = [];
+  for (const file of files) {
+    try {
+      boards.push(...salvageFromBuffer(await file.arrayBuffer()));
+    } catch {
+      /* unreadable file — keep going through the rest */
+    }
+  }
+  return dedupeBoards(boards);
+}
+
+function renderScanResults(boards, fileCount) {
+  const host = document.getElementById("scan-results");
+  host.innerHTML = "";
+  const summary = document.createElement("p");
+  summary.className = "chart-subtitle";
+  if (boards.length === 0) {
+    summary.textContent = `Scanned ${fileCount} file${fileCount === 1 ? "" : "s"} — no boards found inside them.`;
+    host.appendChild(summary);
+    return;
+  }
+  summary.textContent = `Found ${boards.length} board${boards.length === 1 ? "" : "s"} in ${fileCount} file${fileCount === 1 ? "" : "s"}, fullest first.`;
+  host.appendChild(summary);
+
+  for (const board of boards.slice(0, 8)) {
+    const source = { key: "scan", label: "Salvaged from file", data: board };
+    const row = document.createElement("div");
+    row.className = "recovery-row";
+    const text = document.createElement("div");
+    text.className = "recovery-text";
+    const name = document.createElement("strong");
+    name.textContent = "Salvaged copy";
+    const detail = document.createElement("span");
+    detail.textContent = describeSource(source);
+    const sample = document.createElement("span");
+    sample.textContent = board.tasks.slice(0, 3).map((t) => t.title).join(", ")
+      + (board.tasks.length > 3 ? "…" : "");
+    text.append(name, detail, sample);
+
+    const actions = document.createElement("div");
+    actions.className = "recovery-actions";
+    for (const [label, mode] of [["Merge", "merge"], ["Restore", "replace"]]) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary-btn";
+      btn.textContent = label;
+      btn.addEventListener("click", () => {
+        if (confirm(`${label} this salvaged copy (${board.tasks.length} tasks)?`)) {
+          restoreFrom(source, mode);
+        }
+      });
+      actions.appendChild(btn);
+    }
+    row.append(text, actions);
+    host.appendChild(row);
+  }
+}
+
+const scanInput = document.getElementById("scan-files");
+document.getElementById("scan-btn").addEventListener("click", () => scanInput.click());
+scanInput.addEventListener("change", async () => {
+  const files = [...scanInput.files];
+  scanInput.value = "";
+  if (files.length === 0) return;
+  const host = document.getElementById("scan-results");
+  host.innerHTML = '<p class="chart-subtitle">Scanning…</p>';
+  renderScanResults(await scanFilesForBoards(files), files.length);
+});
+
 /* ---------- Paste a board in as text ---------- */
 
 const pasteDialog = document.getElementById("paste-dialog");
@@ -1197,7 +1376,7 @@ document.getElementById("paste-cancel").addEventListener("click", () => pasteDia
 function parsePastedBoard(text) {
   const trimmed = (text || "").trim();
   if (!trimmed) return null;
-  return tryParse(trimmed) || tryParse(`{"tasks": ${trimmed}}`);
+  return boardFromJsonText(trimmed);
 }
 
 function applyPastedBoard(mode) {
