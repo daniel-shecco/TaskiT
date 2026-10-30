@@ -83,6 +83,8 @@ main {
 .app-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;   /* narrow screens: the tabs drop to their own row
+                        instead of overlapping the buttons beside them */
   gap: 10px;
   max-width: 1080px;
   margin: 0 auto;
@@ -110,6 +112,16 @@ main {
   padding: 6px 12px;
   cursor: pointer;
   white-space: nowrap;
+  max-width: 48vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Touch devices: thumb-sized targets for the controls that matter */
+@media (pointer: coarse) {
+  .secondary-btn,
+  .pill-btn,
+  .tab { min-height: 44px; }
 }
 
 .pill-btn:hover { border-color: var(--series-1); color: var(--series-1); }
@@ -117,6 +129,7 @@ main {
 
 .tabs {
   display: flex;
+  flex: none;
   gap: 4px;
   background: var(--surface-1);
   border: 1px solid var(--border);
