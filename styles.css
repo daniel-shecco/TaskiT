@@ -392,6 +392,52 @@ main {
 .badge.due-critical .dot { background: var(--status-critical); }
 .badge.due-critical { color: var(--status-critical); border-color: var(--status-critical); }
 
+/* ---------- Recovery ---------- */
+.recovery-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--status-warning);
+  border-left: 4px solid var(--status-warning);
+  border-radius: 12px;
+  background: var(--surface-1);
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.recovery-banner[hidden] { display: none; }
+.recovery-banner span { flex: 1; min-width: 220px; }
+
+.recovery-title {
+  margin: 16px 0 2px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.recovery-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--gridline);
+}
+
+.recovery-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 200px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.recovery-actions { display: flex; gap: 8px; }
+
 /* ---------- Subtasks on a card ---------- */
 .subtask-badge {
   font: inherit;

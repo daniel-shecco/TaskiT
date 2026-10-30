@@ -24,6 +24,7 @@
   <main>
     <!-- ============ BOARD VIEW ============ -->
     <section id="view-board" role="tabpanel" aria-labelledby="tab-board">
+      <div id="recovery-banner" class="recovery-banner" hidden></div>
       <form id="add-form" class="add-form" autocomplete="off">
         <input id="task-input" type="text" placeholder="Add a task…" aria-label="Task title" maxlength="200" />
         <button type="button" id="voice-btn" class="icon-btn" title="Add task by voice" aria-label="Add task by voice">
@@ -176,6 +177,9 @@
           <button type="button" id="import-btn" class="secondary-btn">Import JSON</button>
           <input type="file" id="import-file" accept=".json,application/json" hidden />
         </div>
+        <h3 class="recovery-title">Recover an earlier copy</h3>
+        <p class="chart-subtitle">Copies of your board still stored in this browser. Merge keeps everything from both; Restore replaces what's on the board now.</p>
+        <div id="recovery-list"></div>
       </div>
     </section>
   </main>

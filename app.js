@@ -310,15 +310,17 @@ importFile.addEventListener("change", () => {
       showToast("⚠ That file isn't a valid TaskiT backup");
       return;
     }
-    const ok = confirm(
-      `Replace your current data (${data.tasks.length} tasks, ${data.recurring.length} recurring) ` +
-      `with the imported file (${incoming.tasks.length} tasks, ${incoming.recurring.length} recurring)?`
+    // Merging is the safe default when recovering: an import that replaces
+    // can itself lose work done since the file was exported
+    const replace = confirm(
+      `Import ${incoming.tasks.length} tasks / ${incoming.recurring.length} recurring from this file.\n\n` +
+      `OK = REPLACE your current board (${data.tasks.length} tasks)\n` +
+      `Cancel = MERGE both, keeping everything`
     );
-    if (!ok) return;
-    data = incoming;
+    data = replace ? incoming : mergeBoards(data, incoming);
     save();
     renderAll();
-    showToast("Backup imported");
+    showToast(replace ? "Board replaced from file" : "Merged — nothing was dropped");
   };
   reader.readAsText(file);
 });
@@ -330,6 +332,155 @@ function renderBackupNote() {
   note.textContent =
     "Tasks are saved in this browser and auto-backed up daily (last 3 days kept)." +
     when + " Export a JSON file now and then to keep a copy outside the browser.";
+}
+
+/* ============================================================
+   Recovery — every copy of the board still on this device
+   ============================================================ */
+
+/* Every stored copy that still holds tasks, newest first. */
+function recoverySources() {
+  const out = [];
+  for (const key of backupKeysNewestFirst()) {
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
+    const parsed = tryParse(raw);
+    if (!parsed || isEmptyBoard(parsed)) continue;
+    out.push({ key, label: "Daily backup", data: parsed });
+  }
+  const legacy = localStorage.getItem(LEGACY_KEY);
+  if (legacy) {
+    const parsed = tryParse(`{"tasks": ${legacy}}`);
+    if (parsed && !isEmptyBoard(parsed)) {
+      out.push({ key: LEGACY_KEY, label: "Pre-2024 format", data: parsed });
+    }
+  }
+  return out;
+}
+
+function lastTouched(task) {
+  return Math.max(task.completedAt || 0, task.missedAt || 0, task.createdAt || 0);
+}
+
+/* Union of two boards: nothing from either side is dropped. Where both
+   hold the same task, the copy that was touched most recently wins. */
+function mergeBoards(current, incoming) {
+  const tasks = new Map();
+  for (const t of [...incoming.tasks, ...current.tasks]) {
+    const existing = tasks.get(t.id);
+    if (!existing || lastTouched(t) > lastTouched(existing)) tasks.set(t.id, t);
+  }
+  const recurring = new Map();
+  for (const r of [...incoming.recurring, ...current.recurring]) recurring.set(r.id, r);
+  const categories = [...new Set([...current.categories, ...incoming.categories])];
+  return {
+    version: SCHEMA_VERSION,
+    tasks: [...tasks.values()].sort((a, b) => b.createdAt - a.createdAt),
+    recurring: [...recurring.values()],
+    categories,
+    updatedAt: Date.now(),
+  };
+}
+
+/* Restoring stamps the board as the newest version, so it wins the next
+   reconciliation and repairs the cloud copy too */
+function restoreFrom(source, mode) {
+  const incoming = sanitizeData(source.data);
+  if (!incoming) {
+    showToast("⚠ That copy couldn't be read");
+    return;
+  }
+  data = mode === "merge" ? mergeBoards(data, incoming) : incoming;
+  save();
+  renderAll();
+  renderRecoveryBanner();
+  showToast(mode === "merge" ? "Merged — nothing was dropped" : "Board restored");
+}
+
+function describeSource(source) {
+  const d = source.data;
+  const when = d.updatedAt ? `last change ${formatDate(d.updatedAt)}` : "date unknown";
+  const open = d.tasks.filter((t) => t.status !== "done" && t.status !== "missed").length;
+  return `${d.tasks.length} task${d.tasks.length === 1 ? "" : "s"} (${open} open) · `
+    + `${d.recurring.length} recurring · ${when}`;
+}
+
+function renderRecoveryList() {
+  const host = document.getElementById("recovery-list");
+  if (!host) return;
+  host.innerHTML = "";
+  const sources = recoverySources();
+  if (sources.length === 0) {
+    const p = document.createElement("p");
+    p.className = "chart-subtitle";
+    p.textContent = "No in-browser backups found on this device. An exported JSON file can still be restored with Import above.";
+    host.appendChild(p);
+    return;
+  }
+  for (const source of sources) {
+    const row = document.createElement("div");
+    row.className = "recovery-row";
+
+    const text = document.createElement("div");
+    text.className = "recovery-text";
+    const name = document.createElement("strong");
+    name.textContent = source.label;
+    const detail = document.createElement("span");
+    detail.textContent = describeSource(source);
+    text.append(name, detail);
+
+    const actions = document.createElement("div");
+    actions.className = "recovery-actions";
+
+    const merge = document.createElement("button");
+    merge.type = "button";
+    merge.className = "secondary-btn";
+    merge.textContent = "Merge";
+    merge.title = "Keep everything from both this copy and your current board";
+    merge.addEventListener("click", () => {
+      if (confirm(`Merge ${source.data.tasks.length} tasks from this copy into your current board?\nNothing is removed.`)) {
+        restoreFrom(source, "merge");
+      }
+    });
+
+    const replace = document.createElement("button");
+    replace.type = "button";
+    replace.className = "secondary-btn";
+    replace.textContent = "Restore";
+    replace.title = "Replace the current board with this copy";
+    replace.addEventListener("click", () => {
+      if (confirm(`Replace your current board (${data.tasks.length} tasks) with this copy (${source.data.tasks.length} tasks)?`)) {
+        restoreFrom(source, "replace");
+      }
+    });
+
+    actions.append(merge, replace);
+    row.append(text, actions);
+    host.appendChild(row);
+  }
+}
+
+/* If the board is empty but a backup is not, say so on the board itself
+   rather than waiting to be found in a settings panel */
+function renderRecoveryBanner() {
+  const host = document.getElementById("recovery-banner");
+  if (!host) return;
+  host.innerHTML = "";
+  const sources = isEmptyBoard(data) ? recoverySources() : [];
+  host.hidden = sources.length === 0;
+  if (sources.length === 0) return;
+
+  // Offer the fullest copy, not just the most recent one — a newer backup
+  // can itself have been taken while the board was half gone
+  const best = [...sources].sort((a, b) => b.data.tasks.length - a.data.tasks.length)[0];
+  const text = document.createElement("span");
+  text.textContent = `Your board is empty, but this device still has a backup — ${describeSource(best)}.`;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "secondary-btn";
+  btn.textContent = "Restore it";
+  btn.addEventListener("click", () => restoreFrom(best, "replace"));
+  host.append(text, btn);
 }
 
 /* ============================================================
@@ -1461,6 +1612,7 @@ function renderStats() {
   renderRanking("list-slowest", done, (a, b) => b.duration - a.duration);
   renderRanking("list-fastest", done, (a, b) => a.duration - b.duration);
   renderBackupNote();
+  renderRecoveryList();
 }
 
 /* ============================================================
@@ -2022,6 +2174,7 @@ function attachTooltip(target, html) {
 function renderAll() {
   renderBoard();
   renderCategoryDatalist();
+  renderRecoveryBanner();
   if (!viewStats.hidden) renderStats();
 }
 

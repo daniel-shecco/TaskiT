@@ -65,6 +65,7 @@ async function init() {
       }
     });
 
+    syncBtn.textContent = "Sign in to sync"; // label it before it appears
     syncBtn.hidden = false;
     syncBtn.addEventListener("click", async () => {
       if (user) {
