@@ -405,6 +405,8 @@ main {
 .badge.due-critical .dot { background: var(--status-critical); }
 .badge.due-critical { color: var(--status-critical); border-color: var(--status-critical); }
 
+#persist-note.warn { color: var(--status-serious); }
+
 /* ---------- Recovery ---------- */
 .recovery-banner {
   display: flex;

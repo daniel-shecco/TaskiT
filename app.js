@@ -325,6 +325,30 @@ importFile.addEventListener("change", () => {
   reader.readAsText(file);
 });
 
+/* Browsers evict ordinary site storage when the device runs low on space.
+   Persistent storage exempts this origin from that; Chrome grants it
+   silently to installed or frequently used sites. */
+async function ensurePersistentStorage() {
+  const el = document.getElementById("persist-note");
+  if (!navigator.storage || !navigator.storage.persist) {
+    if (el) el.textContent = "This browser can't protect the board from being cleared automatically — export a copy now and then.";
+    return null;
+  }
+  let granted = false;
+  try {
+    granted = (await navigator.storage.persisted()) || (await navigator.storage.persist());
+  } catch {
+    granted = false;
+  }
+  if (el) {
+    el.textContent = granted
+      ? "✓ Storage is protected: this browser won't clear your board to free up space."
+      : "⚠ Storage is not protected — the browser may clear your board to free up space. Adding TaskiT to your home screen usually earns protection.";
+    el.classList.toggle("warn", !granted);
+  }
+  return granted;
+}
+
 function renderBackupNote() {
   const meta = backupMeta();
   const note = document.getElementById("backup-note");
@@ -2228,6 +2252,7 @@ renderAll();
 persistLocal();
 renderNotifyButton();
 checkDeadlineNotifications();
+ensurePersistentStorage();
 
 bridge.setSyncNote("Cloud sync: not configured — see SETUP-SYNC.md to enable it.");
 import("./sync.js").catch(() => {
