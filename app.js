@@ -1178,6 +1178,51 @@ addForm.addEventListener("submit", (e) => {
   taskInput.focus();
 });
 
+/* ---------- Paste a board in as text ---------- */
+
+const pasteDialog = document.getElementById("paste-dialog");
+const pasteText = document.getElementById("paste-text");
+const pasteStatus = document.getElementById("paste-status");
+
+document.getElementById("paste-btn").addEventListener("click", () => {
+  pasteText.value = "";
+  pasteStatus.textContent = "";
+  pasteDialog.showModal();
+});
+
+document.getElementById("paste-cancel").addEventListener("click", () => pasteDialog.close());
+
+/* Accepts a whole export file, the app's own data object, a Firestore
+   document, or just the bare array of tasks */
+function parsePastedBoard(text) {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return null;
+  return tryParse(trimmed) || tryParse(`{"tasks": ${trimmed}}`);
+}
+
+function applyPastedBoard(mode) {
+  const incoming = parsePastedBoard(pasteText.value);
+  if (!incoming) {
+    pasteStatus.textContent = "⚠ That doesn't look like TaskiT data — paste the whole JSON object, braces included.";
+    return;
+  }
+  if (isEmptyBoard(incoming)) {
+    pasteStatus.textContent = "⚠ That parsed fine but holds no tasks.";
+    return;
+  }
+  data = mode === "merge" ? mergeBoards(data, incoming) : incoming;
+  save();
+  renderAll();
+  pasteDialog.close();
+  showToast(`${mode === "merge" ? "Merged" : "Restored"} ${incoming.tasks.length} tasks`);
+}
+
+document.getElementById("paste-merge").addEventListener("click", () => applyPastedBoard("merge"));
+document.getElementById("paste-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  applyPastedBoard("replace");
+});
+
 /* ============================================================
    Edit dialog — change title, due date, and recurrence in place
    ============================================================ */

@@ -176,6 +176,7 @@
         <div class="data-actions">
           <button type="button" id="export-btn" class="secondary-btn">Export JSON</button>
           <button type="button" id="import-btn" class="secondary-btn">Import JSON</button>
+          <button type="button" id="paste-btn" class="secondary-btn">Paste JSON</button>
           <input type="file" id="import-file" hidden />
         </div>
         <h3 class="recovery-title">Recover an earlier copy</h3>
@@ -184,6 +185,20 @@
       </div>
     </section>
   </main>
+
+  <dialog id="paste-dialog">
+    <form id="paste-form">
+      <h2 class="dialog-title">Paste a board</h2>
+      <p class="chart-subtitle">Paste the contents of an exported file, or the <code>tasks</code> document copied out of the Firebase console.</p>
+      <textarea id="paste-text" rows="8" placeholder="{ &quot;tasks&quot;: [ … ] }" spellcheck="false"></textarea>
+      <p id="paste-status" class="chart-subtitle"></p>
+      <div class="dialog-actions">
+        <button type="button" id="paste-cancel" class="secondary-btn">Cancel</button>
+        <button type="button" id="paste-merge" class="secondary-btn">Merge</button>
+        <button type="submit" class="add-btn">Replace</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="edit-dialog">
     <form id="edit-form">

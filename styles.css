@@ -405,6 +405,32 @@ main {
 .badge.due-critical .dot { background: var(--status-critical); }
 .badge.due-critical { color: var(--status-critical); border-color: var(--status-critical); }
 
+#paste-dialog {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  padding: 18px;
+  width: min(520px, 92vw);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+}
+
+#paste-dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+
+#paste-text {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  background: var(--page);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
 #persist-note.warn { color: var(--status-serious); }
 
 /* ---------- Recovery ---------- */
