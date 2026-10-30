@@ -1385,15 +1385,20 @@ function applyPastedBoard(mode) {
     pasteStatus.textContent = "⚠ That doesn't look like TaskiT data — paste the whole JSON object, braces included.";
     return;
   }
-  if (isEmptyBoard(incoming)) {
-    pasteStatus.textContent = "⚠ That parsed fine but holds no tasks.";
+  // Tasks, recurrences or just a set of categories are all worth taking
+  const parts = [];
+  if (incoming.tasks.length) parts.push(`${incoming.tasks.length} task${incoming.tasks.length === 1 ? "" : "s"}`);
+  if (incoming.recurring.length) parts.push(`${incoming.recurring.length} recurring`);
+  if (incoming.categories.length) parts.push(`${incoming.categories.length} categories`);
+  if (parts.length === 0) {
+    pasteStatus.textContent = "⚠ That parsed fine but holds nothing to import.";
     return;
   }
   data = mode === "merge" ? mergeBoards(data, incoming) : incoming;
   save();
   renderAll();
   pasteDialog.close();
-  showToast(`${mode === "merge" ? "Merged" : "Restored"} ${incoming.tasks.length} tasks`);
+  showToast(`${mode === "merge" ? "Merged" : "Restored"} ${parts.join(", ")}`);
 }
 
 document.getElementById("paste-merge").addEventListener("click", () => applyPastedBoard("merge"));
