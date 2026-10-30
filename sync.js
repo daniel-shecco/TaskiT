@@ -21,6 +21,10 @@ let fs = null; // firestore module namespace
 let user = null;
 let pushTimer = null;
 let unsubscribe = null;
+/* Nothing is written to the cloud until the first snapshot has told us
+   what is already there — otherwise a local change made during startup
+   could overwrite a board this device has not seen yet. */
+let seenRemote = false;
 
 init();
 
@@ -96,14 +100,11 @@ function startSync() {
     if (snap.metadata.hasPendingWrites) return; // our own write echoing back
     const remote = snap.data();
     const local = bridge.getData();
-    if (!remote) {
-      // First device: seed the cloud with local data
-      if (local.tasks.length || local.recurring.length) push();
-      return;
-    }
-    if ((remote.updatedAt || 0) > (local.updatedAt || 0)) {
+    seenRemote = true; // we now know what the cloud holds — safe to write
+    const action = bridge.decideSync(local, remote);
+    if (action === "adopt") {
       if (bridge.replaceData(remote)) bridge.showToast("Synced from cloud");
-    } else if ((local.updatedAt || 0) > (remote.updatedAt || 0)) {
+    } else if (action === "push") {
       push();
     }
   }, () => {
@@ -117,6 +118,7 @@ function stopSync() {
     unsubscribe = null;
   }
   clearTimeout(pushTimer);
+  seenRemote = false; // a new session must read the cloud again first
 }
 
 function schedulePush() {
@@ -126,7 +128,7 @@ function schedulePush() {
 }
 
 async function push() {
-  if (!user) return;
+  if (!user || !seenRemote) return; // never write before we have read
   try {
     const d = bridge.getData();
     await fs.setDoc(docRef(), {

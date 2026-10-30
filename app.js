@@ -216,6 +216,12 @@ function loadData() {
   return { version: SCHEMA_VERSION, tasks: [], recurring: [], categories: [], updatedAt: 0 };
 }
 
+/* A board with no tasks and no recurrences — never allowed to overwrite
+   one that still has content, locally or in the cloud */
+function isEmptyBoard(d) {
+  return !d || ((d.tasks || []).length === 0 && (d.recurring || []).length === 0);
+}
+
 function backupMeta() {
   try {
     const meta = JSON.parse(localStorage.getItem(BACKUP_META_KEY));
@@ -237,6 +243,9 @@ function maybeBackup(serialized) {
   const today = new Date().toISOString().slice(0, 10);
   const meta = backupMeta();
   if (meta.lastDay === today) return;
+  // An empty board is never worth a backup slot — and must never push a
+  // slot that still holds real tasks out of the rotation
+  if (isEmptyBoard(data)) return;
   try {
     localStorage.setItem(BACKUP_KEYS[meta.slot % BACKUP_KEYS.length], serialized);
     localStorage.setItem(
@@ -2025,6 +2034,22 @@ export const bridge = {
   /** Set by sync.js: called (debounced there) after every local mutation */
   onLocalChange: null,
   getData: () => data,
+  /**
+   * Which side wins when this device and the cloud disagree.
+   * The rule that matters: a board with content is NEVER replaced by an
+   * empty one. A device whose storage was cleared, or a first sign-in,
+   * adopts the cloud instead of wiping it.
+   */
+  decideSync(local, remote) {
+    if (!remote) return isEmptyBoard(local) ? "idle" : "push";
+    if (isEmptyBoard(local) && !isEmptyBoard(remote)) return "adopt";
+    if (isEmptyBoard(remote) && !isEmptyBoard(local)) return "push";
+    const l = local.updatedAt || 0;
+    const r = remote.updatedAt || 0;
+    if (r > l) return "adopt";
+    if (l > r) return "push";
+    return "idle";
+  },
   /** Replace state with a remote copy — persists locally WITHOUT
       bumping updatedAt or echoing back through onLocalChange */
   replaceData(remote) {
@@ -2044,7 +2069,10 @@ export const bridge = {
 
 runRecurrence();
 renderAll();
-save(); // persist any v1 migration and trigger the daily backup
+// Persist any v1 migration and take the daily backup — but WITHOUT
+// bumping updatedAt. Stamping "now" here made a stale or wiped local
+// board look newer than the cloud, and it then overwrote it.
+persistLocal();
 renderNotifyButton();
 checkDeadlineNotifications();
 
