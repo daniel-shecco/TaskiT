@@ -1148,7 +1148,33 @@ const addForm = document.getElementById("add-form");
 const taskInput = document.getElementById("task-input");
 const dueInput = document.getElementById("due-input");
 const recurInput = document.getElementById("recur-input");
-const catInput = document.getElementById("cat-input");
+const catSelect = document.getElementById("cat-select");
+const catNew = document.getElementById("cat-new");
+
+/* Offered in every category dropdown, in this order — which is also the
+   order their colours are assigned in */
+const DEFAULT_CATEGORIES = [
+  "Wellness",
+  "Fitness",
+  "Daily tasks",
+  "Business",
+  "Intellectual development",
+  "Reminder",
+];
+const NEW_CATEGORY = "__new__";
+
+/* Adds any default the board doesn't carry yet, keeping whatever order
+   the existing ones already have so their colours never shift */
+function ensureDefaultCategories() {
+  let added = false;
+  for (const name of DEFAULT_CATEGORIES) {
+    if (!data.categories.includes(name)) {
+      data.categories.push(name);
+      added = true;
+    }
+  }
+  return added;
+}
 
 /* Category color: slot by position in the (stable) category list;
    9th and later fold to the neutral gray, never a generated hue */
@@ -1159,15 +1185,57 @@ function categoryColor(name) {
   return styles.getPropertyValue(varName).trim();
 }
 
-function renderCategoryDatalist() {
-  const list = document.getElementById("cat-list");
-  list.innerHTML = "";
-  for (const name of data.categories) {
+/* One picker = a dropdown plus the text box that appears for "New…" */
+function fillCategorySelect(select, current) {
+  select.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "No category";
+  select.appendChild(none);
+
+  const names = [...new Set([...DEFAULT_CATEGORIES, ...data.categories])];
+  if (current && !names.includes(current)) names.push(current);
+  for (const name of names) {
     const opt = document.createElement("option");
     opt.value = name;
-    list.appendChild(opt);
+    opt.textContent = name;
+    select.appendChild(opt);
   }
+
+  const add = document.createElement("option");
+  add.value = NEW_CATEGORY;
+  add.textContent = "+ New category…";
+  select.appendChild(add);
+
+  select.value = current || "";
 }
+
+function wireCategoryPicker(select, input) {
+  select.addEventListener("change", () => {
+    const adding = select.value === NEW_CATEGORY;
+    input.hidden = !adding;
+    if (adding) input.focus();
+    else input.value = "";
+  });
+}
+
+function categoryPickerValue(select, input) {
+  if (select.value === NEW_CATEGORY) return input.value.trim() || null;
+  return select.value || null;
+}
+
+function resetCategoryPicker(select, input) {
+  input.value = "";
+  input.hidden = true;
+  fillCategorySelect(select, "");
+}
+
+function renderCategoryPickers() {
+  fillCategorySelect(catSelect, categoryPickerValue(catSelect, catNew) || "");
+  if (catSelect.value !== NEW_CATEGORY) catNew.hidden = true;
+}
+
+wireCategoryPicker(catSelect, catNew);
 const daysPicker = document.getElementById("days-picker");
 
 /* Day-picker helpers, shared by the add form and the edit dialog */
@@ -1219,7 +1287,7 @@ addForm.addEventListener("submit", (e) => {
   e.preventDefault();
   const title = taskInput.value.trim();
   if (!title) return;
-  const category = catInput.value.trim() || null;
+  const category = categoryPickerValue(catSelect, catNew);
   if (recurInput.value === "days") {
     const days = pickerDays(daysPicker);
     if (days.length === 0) {
@@ -1235,7 +1303,7 @@ addForm.addEventListener("submit", (e) => {
   taskInput.value = "";
   dueInput.value = "";
   recurInput.value = "";
-  catInput.value = "";
+  resetCategoryPicker(catSelect, catNew);
   resetDaysPicker();
   taskInput.focus();
 });
@@ -1478,6 +1546,8 @@ const editForm = document.getElementById("edit-form");
 const editTitle = document.getElementById("edit-title");
 const editDue = document.getElementById("edit-due");
 const editCategory = document.getElementById("edit-category");
+const editCategoryNew = document.getElementById("edit-category-new");
+wireCategoryPicker(editCategory, editCategoryNew);
 const editRecur = document.getElementById("edit-recur");
 const editDaysPicker = document.getElementById("edit-days-picker");
 
@@ -1554,7 +1624,9 @@ function openEdit(id) {
   editTitle.value = task.title;
   editingOriginalDue = dueAtToDateInput(task.dueAt);
   editDue.value = editingOriginalDue;
-  editCategory.value = task.category || "";
+  fillCategorySelect(editCategory, task.category || "");
+  editCategoryNew.value = "";
+  editCategoryNew.hidden = true;
 
   subtaskEditor.innerHTML = "";
   for (const sub of task.subtasks || []) addSubtaskRow(sub);
@@ -1593,7 +1665,7 @@ editForm.addEventListener("submit", (e) => {
   }
 
   task.title = title;
-  task.category = ensureCategory(editCategory.value) || null;
+  task.category = ensureCategory(categoryPickerValue(editCategory, editCategoryNew)) || null;
   task.subtasks = readSubtaskRows();
   // A card whose steps were all removed shouldn't stay expanded
   if (task.subtasks.length === 0) expandedCards.delete(task.id);
@@ -1698,7 +1770,7 @@ if (!SpeechRec) {
         consumedFinals = i + 1;
         const transcript = result[0].transcript.trim();
         if (transcript) {
-          addTask(transcript, { dueAt: pickedDueAt(), category: catInput.value.trim() || null });
+          addTask(transcript, { dueAt: pickedDueAt(), category: categoryPickerValue(catSelect, catNew) });
           showToast(`Added: ${transcript}`);
         }
         setVoiceStatus("");
@@ -2488,7 +2560,7 @@ function attachTooltip(target, html) {
 
 function renderAll() {
   renderBoard();
-  renderCategoryDatalist();
+  renderCategoryPickers();
   renderRecoveryBanner();
   renderBackupBanner();
   if (!viewStats.hidden) renderStats();
@@ -2538,6 +2610,7 @@ export const bridge = {
 
 runRecurrence();
 // Start the backup clock once there is something worth backing up
+ensureDefaultCategories();
 if (!data.backupReminderAt && !isEmptyBoard(data)) scheduleBackupReminder();
 renderAll();
 // Persist any v1 migration and take the daily backup — but WITHOUT

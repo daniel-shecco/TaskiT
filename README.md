@@ -35,9 +35,10 @@ browser's `localStorage`.
   were finished or missed, keeping those columns tidy. Nothing is deleted:
   archived tasks stay in your data, sync, exports, and all statistics; the
   column shows a "🗄 N archived" note and the Stats tab counts them.
-- **Categories** — tag tasks with a category (e.g. Fitness, Savings,
-  Intellectual growth). Type anything in the Category field; previously used
-  names are suggested. Cards show a color-coded category badge, recurring
+- **Categories** — pick one from the Category dropdown: Wellness, Fitness,
+  Daily tasks, Business, Intellectual development and Reminder come as
+  standard, any you have added are listed alongside them, and "+ New
+  category…" takes a name of your own. Cards show a color-coded category badge, recurring
   tasks pass their category to every spawned card, and each category keeps a
   stable color (9th and later fold to gray in charts).
 - **Stats view** — see how your pace changes over time:

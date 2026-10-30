@@ -261,6 +261,8 @@ main {
   color: #fff;
 }
 
+.cat-new[hidden] { display: none; }
+
 .add-options input,
 .add-options select {
   font: inherit;
@@ -955,6 +957,8 @@ main {
   font-size: 13px;
   color: var(--text-secondary);
 }
+
+.dialog-field .cat-new { margin-top: 6px; }
 
 .dialog-field input,
 .dialog-field select {

@@ -42,9 +42,9 @@
         </label>
         <label class="opt">
           <span>Category</span>
-          <input type="text" id="cat-input" list="cat-list" placeholder="None" maxlength="40" aria-label="Category" />
+          <select id="cat-select" aria-label="Category"></select>
+          <input type="text" id="cat-new" class="cat-new" placeholder="New category" maxlength="40" aria-label="New category name" hidden />
         </label>
-        <datalist id="cat-list"></datalist>
         <label class="opt">
           <span>Repeat</span>
           <select id="recur-input" aria-label="Repeat">
@@ -221,7 +221,8 @@
       </label>
       <label class="dialog-field">
         <span>Category</span>
-        <input id="edit-category" type="text" list="cat-list" placeholder="None" maxlength="40" />
+        <select id="edit-category"></select>
+        <input id="edit-category-new" type="text" class="cat-new" placeholder="New category" maxlength="40" aria-label="New category name" hidden />
       </label>
       <label class="dialog-field">
         <span>Repeat</span>
